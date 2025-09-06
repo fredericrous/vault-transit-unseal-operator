@@ -23,14 +23,22 @@ To add it to the repository:
 
 ## Workflow Overview
 
-### build-and-push.yml
-This workflow:
-- Runs on every push to main and on pull requests
-- Runs tests for all commits
-- Only builds and pushes images for commits to main
-- Automatically increments the patch version (e.g., v0.1.4 → v0.1.5)
-- Pushes images with both version tag and `latest` tag
-- Creates a GitHub release with auto-generated release notes
+### ci.yml
+This workflow handles both CI (Continuous Integration) and CD (Continuous Deployment):
+
+#### For Pull Requests:
+- Runs tests
+- Checks code formatting
+- Builds Docker image (not pushed)
+- Comments on PR with build status
+
+#### For Main Branch (push/merge):
+- Runs tests
+- Checks code formatting
+- Builds Docker image
+- Increments version (patch by default)
+- Pushes image with version tag and `latest`
+- Creates GitHub release with release notes
 
 ### Version Incrementing
 The workflow automatically increments the patch version. If you need to bump minor or major versions, manually create a tag:
