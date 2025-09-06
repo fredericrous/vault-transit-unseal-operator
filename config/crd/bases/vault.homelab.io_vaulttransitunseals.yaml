@@ -1,0 +1,179 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: vaulttransitunseals.vault.homelab.io
+spec:
+  group: vault.homelab.io
+  names:
+    kind: VaultTransitUnseal
+    listKind: VaultTransitUnsealList
+    plural: vaulttransitunseals
+    singular: vaulttransitunseal
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: VaultTransitUnseal is the Schema for the vaulttransitunseals
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: VaultTransitUnsealSpec defines the desired state of VaultTransitUnseal
+            properties:
+              initialization:
+                description: Initialization parameters
+                properties:
+                  recoveryShares:
+                    default: 1
+                    description: Number of recovery key shares
+                    type: integer
+                  recoveryThreshold:
+                    default: 1
+                    description: Recovery key threshold
+                    type: integer
+                  secretNames:
+                    description: Names for created secrets
+                    properties:
+                      adminToken:
+                        default: vault-admin-token
+                        description: Name for admin token secret
+                        type: string
+                      recoveryKeys:
+                        default: vault-keys
+                        description: Name for recovery keys secret
+                        type: string
+                    type: object
+                type: object
+              monitoring:
+                description: Monitoring parameters
+                properties:
+                  checkInterval:
+                    default: 30s
+                    description: How often to check Vault status
+                    type: string
+                  retryInterval:
+                    default: 10s
+                    description: Retry interval for failed operations
+                    type: string
+                type: object
+              transitVault:
+                description: Transit Vault configuration
+                properties:
+                  address:
+                    description: Transit Vault address
+                    type: string
+                  keyName:
+                    default: autounseal
+                    description: Transit key name
+                    type: string
+                  mountPath:
+                    default: transit
+                    description: Transit mount path
+                    type: string
+                  secretRef:
+                    description: Secret containing transit token
+                    properties:
+                      key:
+                        default: token
+                        description: Key in the secret
+                        type: string
+                      name:
+                        description: Name of the secret
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  tlsSkipVerify:
+                    default: true
+                    description: Skip TLS verification
+                    type: boolean
+                required:
+                - address
+                - secretRef
+                type: object
+              vaultPod:
+                description: Vault pods to manage
+                properties:
+                  namespace:
+                    description: Namespace where Vault is deployed
+                    type: string
+                  selector:
+                    additionalProperties:
+                      type: string
+                    description: Label selector for Vault pods
+                    type: object
+                required:
+                - namespace
+                - selector
+                type: object
+            required:
+            - transitVault
+            - vaultPod
+            type: object
+          status:
+            description: VaultTransitUnsealStatus defines the observed state of VaultTransitUnseal
+            properties:
+              conditions:
+                description: Current conditions
+                items:
+                  description: Condition represents the state of a VaultTransitUnseal
+                    at a certain point
+                  properties:
+                    lastTransitionTime:
+                      description: Last time the condition transitioned
+                      type: string
+                    message:
+                      description: Human-readable message
+                      type: string
+                    reason:
+                      description: Reason for the condition's last transition
+                      type: string
+                    status:
+                      description: Status of the condition, one of True, False, Unknown
+                      type: string
+                    type:
+                      description: Type of condition
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              initialized:
+                description: Whether Vault is initialized
+                type: boolean
+              lastCheckTime:
+                description: Last time Vault status was checked
+                type: string
+              sealed:
+                description: Whether Vault is sealed
+                type: boolean
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
