@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-operator/api/v1alpha1"
@@ -96,6 +97,7 @@ var _ = Describe("VaultTransitUnseal Controller", func() {
 			controllerReconciler := &VaultTransitUnsealReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
+				Log:    ctrl.Log.WithName("controllers").WithName("VaultTransitUnseal"),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{

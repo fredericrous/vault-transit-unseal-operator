@@ -38,10 +38,14 @@ func (r *VaultTransitUnsealReconciler) Reconcile(ctx context.Context, req ctrl.R
 	vtu := &vaultv1alpha1.VaultTransitUnseal{}
 	if err := r.Get(ctx, req.NamespacedName, vtu); err != nil {
 		if errors.IsNotFound(err) {
+			log.V(1).Info("VaultTransitUnseal resource not found, likely deleted")
 			return ctrl.Result{}, nil
 		}
+		log.Error(err, "Failed to get VaultTransitUnseal")
 		return ctrl.Result{}, err
 	}
+
+	log.V(1).Info("Processing VaultTransitUnseal", "namespace", vtu.Namespace, "name", vtu.Name)
 
 	// Get Vault pods
 	pods := &corev1.PodList{}
@@ -97,7 +101,11 @@ func (r *VaultTransitUnsealReconciler) Reconcile(ctx context.Context, req ctrl.R
 			} else {
 				r.updateCondition(vtu, "Initialization", "True", "Initialized", "Vault initialized successfully")
 				vtu.Status.Initialized = true
+				log.Info("Vault initialized successfully", "pod", pod.Name)
 			}
+		} else {
+			log.V(1).Info("Vault already initialized", "pod", pod.Name)
+			r.updateCondition(vtu, "Initialization", "True", "Initialized", "Vault is initialized")
 		}
 
 		// Ensure unsealed (transit unseal should handle this automatically)
@@ -109,9 +117,23 @@ func (r *VaultTransitUnsealReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 	}
 
-	// Update status
-	if err := r.Status().Update(ctx, vtu); err != nil {
-		log.Error(err, "Failed to update VaultTransitUnseal status")
+	// Update status using Server-Side Apply - no need to fetch current version
+	// This creates a patch that only updates the status fields we care about
+	patch := &vaultv1alpha1.VaultTransitUnseal{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      vtu.Name,
+			Namespace: vtu.Namespace,
+		},
+		Status: vtu.Status,
+	}
+
+	// Apply the patch using Server-Side Apply
+	if err := r.Status().Patch(ctx, patch, client.Apply,
+		client.FieldOwner("vault-operator"),
+		client.ForceOwnership); err != nil {
+		log.Error(err, "Failed to update VaultTransitUnseal status",
+			"namespace", vtu.Namespace,
+			"name", vtu.Name)
 		return ctrl.Result{}, err
 	}
 
@@ -134,7 +156,8 @@ func (r *VaultTransitUnsealReconciler) checkVaultStatus(ctx context.Context, pod
 
 	// Create Vault client
 	config := vaultapi.DefaultConfig()
-	config.Address = fmt.Sprintf("http://%s.%s.svc.cluster.local:8200", pod.Name, pod.Namespace)
+	// Use pod IP directly to avoid DNS issues
+	config.Address = fmt.Sprintf("http://%s:8200", pod.Status.PodIP)
 
 	client, err := vaultapi.NewClient(config)
 	if err != nil {
@@ -156,7 +179,8 @@ func (r *VaultTransitUnsealReconciler) checkVaultStatus(ctx context.Context, pod
 func (r *VaultTransitUnsealReconciler) initializeVault(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) error {
 	// Create Vault client
 	config := vaultapi.DefaultConfig()
-	config.Address = fmt.Sprintf("http://%s.%s.svc.cluster.local:8200", pod.Name, pod.Namespace)
+	// Use pod IP directly to avoid DNS issues
+	config.Address = fmt.Sprintf("http://%s:8200", pod.Status.PodIP)
 
 	client, err := vaultapi.NewClient(config)
 	if err != nil {
@@ -215,9 +239,10 @@ func (r *VaultTransitUnsealReconciler) initializeVault(ctx context.Context, pod 
 
 func (r *VaultTransitUnsealReconciler) getTransitToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) (string, error) {
 	secret := &corev1.Secret{}
+	// Use the VaultPod namespace for the secret, not the VaultTransitUnseal namespace
 	if err := r.Get(ctx, types.NamespacedName{
 		Name:      vtu.Spec.TransitVault.SecretRef.Name,
-		Namespace: vtu.Namespace,
+		Namespace: vtu.Spec.VaultPod.Namespace,
 	}, secret); err != nil {
 		return "", fmt.Errorf("failed to get transit token secret: %w", err)
 	}
