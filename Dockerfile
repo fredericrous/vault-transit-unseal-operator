@@ -1,5 +1,8 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.25.1-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git
 
 WORKDIR /workspace
 
@@ -11,9 +14,11 @@ RUN go mod download
 COPY main.go .
 COPY api/ api/
 COPY controllers/ controllers/
+COPY pkg/ pkg/
 
-# Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager main.go
+# Build with proper flags for smaller binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} \
+    go build -a -trimpath -ldflags="-w -s" -o manager main.go
 
 # Runtime stage
 FROM gcr.io/distroless/static:nonroot

@@ -1,5 +1,9 @@
 # Vault Transit Unseal Operator
 
+[![CI](https://github.com/fredericrous/homelab/actions/workflows/ci.yml/badge.svg)](https://github.com/fredericrous/homelab/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/fredericrous/homelab/vault-operator)](https://goreportcard.com/report/github.com/fredericrous/homelab/vault-operator)
+[![License](https://img.shields.io/github/license/fredericrous/homelab)](LICENSE)
+
 A Kubernetes operator that automatically manages Vault initialization and unsealing using HashiCorp Vault's transit unseal feature.
 
 ## Features

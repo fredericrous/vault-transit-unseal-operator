@@ -3,298 +3,246 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/go-logr/logr"
-	vaultapi "github.com/hashicorp/vault/api"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-operator/api/v1alpha1"
+	"github.com/fredericrous/homelab/vault-operator/pkg/config"
+	operrors "github.com/fredericrous/homelab/vault-operator/pkg/errors"
+	"github.com/fredericrous/homelab/vault-operator/pkg/health"
+	"github.com/fredericrous/homelab/vault-operator/pkg/metrics"
+	"github.com/fredericrous/homelab/vault-operator/pkg/reconciler"
+	"github.com/fredericrous/homelab/vault-operator/pkg/vault"
 )
 
 // VaultTransitUnsealReconciler reconciles a VaultTransitUnseal object
 type VaultTransitUnsealReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log             logr.Logger
+	Scheme          *runtime.Scheme
+	Recorder        record.EventRecorder
+	Config          *config.OperatorConfig
+	VaultReconciler *reconciler.VaultReconciler
+	HealthChecker   *health.Checker
 }
 
+// SetupWithManager sets up the controller with the Manager.
+func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Initialize config if not set
+	if r.Config == nil {
+		r.Config = config.NewDefaultConfig()
+	}
+
+	// Create metrics recorder
+	metricsRecorder := metrics.NewRecorder()
+
+	// Create vault client factory
+	vaultFactory := &vaultClientFactory{
+		tlsSkipVerify: !r.Config.EnableTLSValidation,
+		timeout:       r.Config.DefaultVaultTimeout,
+	}
+
+	// Create secret manager
+	secretMgr := &secretManager{
+		client: r.Client,
+		log:    r.Log.WithName("secrets"),
+	}
+
+	// Create vault reconciler with all dependencies
+	r.VaultReconciler = &reconciler.VaultReconciler{
+		Client:          r.Client,
+		Log:             r.Log.WithName("vault-reconciler"),
+		Recorder:        r.Recorder,
+		VaultFactory:    vaultFactory,
+		SecretManager:   secretMgr,
+		MetricsRecorder: metricsRecorder,
+	}
+
+	// Create health checker
+	r.HealthChecker = health.NewChecker(r.Client, vaultFactory, r.Log.WithName("health"))
+
+	// Configure controller options
+	opts := controller.Options{
+		MaxConcurrentReconciles: r.Config.MaxConcurrentReconciles,
+	}
+
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&vaultv1alpha1.VaultTransitUnseal{}).
+		WithOptions(opts).
+		Complete(r)
+}
+
+// Reconcile handles the reconciliation loop
 // +kubebuilder:rbac:groups=vault.homelab.io,resources=vaulttransitunseals,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vault.homelab.io,resources=vaulttransitunseals/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=pods/exec,verbs=create
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;create;update
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 func (r *VaultTransitUnsealReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("vaulttransitunseal", req.NamespacedName)
+	log := r.Log.WithValues("resource", req.NamespacedName, "trace_id", generateTraceID())
+	ctx = logr.NewContext(ctx, log)
+
+	log.V(1).Info("Starting reconciliation")
 
 	// Fetch the VaultTransitUnseal instance
 	vtu := &vaultv1alpha1.VaultTransitUnseal{}
 	if err := r.Get(ctx, req.NamespacedName, vtu); err != nil {
 		if errors.IsNotFound(err) {
-			log.V(1).Info("VaultTransitUnseal resource not found, likely deleted")
+			log.V(1).Info("Resource not found, likely deleted")
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "Failed to get VaultTransitUnseal")
-		return ctrl.Result{}, err
+		return ctrl.Result{}, operrors.NewTransientError("failed to get VaultTransitUnseal", err).
+			WithContext("resource", req.NamespacedName)
 	}
 
-	log.V(1).Info("Processing VaultTransitUnseal", "namespace", vtu.Namespace, "name", vtu.Name)
+	// Delegate to vault reconciler
+	result := r.VaultReconciler.Reconcile(ctx, vtu)
 
-	// Get Vault pods
-	pods := &corev1.PodList{}
-	if err := r.List(ctx, pods, client.InNamespace(vtu.Spec.VaultPod.Namespace), client.MatchingLabels(vtu.Spec.VaultPod.Selector)); err != nil {
-		log.Error(err, "Failed to list Vault pods")
-		return ctrl.Result{}, err
+	// Handle result
+	if result.Error != nil {
+		log.Error(result.Error, "Reconciliation failed")
+
+		// Check if we should retry
+		if operrors.ShouldRetry(result.Error) {
+			// Use exponential backoff for transient errors
+			return ctrl.Result{
+				RequeueAfter: calculateBackoff(vtu, result.RequeueAfter),
+			}, nil
+		}
+
+		// Don't retry permanent errors
+		return ctrl.Result{}, result.Error
 	}
 
-	if len(pods.Items) == 0 {
-		log.Info("No Vault pods found")
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-
-	// Process each Vault pod
-	for _, pod := range pods.Items {
-		if pod.Status.Phase != corev1.PodRunning {
-			log.Info("Vault pod not running", "pod", pod.Name, "phase", pod.Status.Phase)
-			continue
-		}
-
-		// Check if vault container is ready
-		vaultReady := false
-		for _, cs := range pod.Status.ContainerStatuses {
-			if cs.Name == "vault" && cs.Ready {
-				vaultReady = true
-				break
-			}
-		}
-
-		if !vaultReady {
-			log.Info("Vault container not ready", "pod", pod.Name)
-			continue
-		}
-
-		// Check Vault status
-		status, err := r.checkVaultStatus(ctx, &pod, vtu)
-		if err != nil {
-			log.Error(err, "Failed to check Vault status", "pod", pod.Name)
-			continue
-		}
-
-		// Update status
-		vtu.Status.Initialized = status.Initialized
-		vtu.Status.Sealed = status.Sealed
-		vtu.Status.LastCheckTime = metav1.Now().Format(time.RFC3339)
-
-		// Handle initialization
-		if !status.Initialized {
-			log.Info("Vault not initialized, initializing", "pod", pod.Name)
-			if err := r.initializeVault(ctx, &pod, vtu); err != nil {
-				log.Error(err, "Failed to initialize Vault", "pod", pod.Name)
-				r.updateCondition(vtu, "Initialization", "False", "InitializationFailed", err.Error())
-			} else {
-				r.updateCondition(vtu, "Initialization", "True", "Initialized", "Vault initialized successfully")
-				vtu.Status.Initialized = true
-				log.Info("Vault initialized successfully", "pod", pod.Name)
-			}
-		} else {
-			log.V(1).Info("Vault already initialized", "pod", pod.Name)
-			r.updateCondition(vtu, "Initialization", "True", "Initialized", "Vault is initialized")
-		}
-
-		// Ensure unsealed (transit unseal should handle this automatically)
-		if status.Sealed {
-			log.Info("Vault is sealed, this shouldn't happen with transit unseal", "pod", pod.Name)
-			r.updateCondition(vtu, "Unsealed", "False", "Sealed", "Vault is sealed despite transit unseal")
-		} else {
-			r.updateCondition(vtu, "Unsealed", "True", "Unsealed", "Vault is unsealed")
-		}
-	}
-
-	// Update status using Server-Side Apply - no need to fetch current version
-	// This creates a patch that only updates the status fields we care about
-	patch := &vaultv1alpha1.VaultTransitUnseal{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      vtu.Name,
-			Namespace: vtu.Namespace,
-		},
-		Status: vtu.Status,
-	}
-
-	// Apply the patch using Server-Side Apply
-	if err := r.Status().Patch(ctx, patch, client.Apply,
-		client.FieldOwner("vault-operator"),
-		client.ForceOwnership); err != nil {
-		log.Error(err, "Failed to update VaultTransitUnseal status",
-			"namespace", vtu.Namespace,
-			"name", vtu.Name)
-		return ctrl.Result{}, err
-	}
-
-	// Requeue after check interval
-	checkInterval, _ := time.ParseDuration(vtu.Spec.Monitoring.CheckInterval)
-	return ctrl.Result{RequeueAfter: checkInterval}, nil
+	log.V(1).Info("Reconciliation completed successfully", "requeueAfter", result.RequeueAfter)
+	return ctrl.Result{RequeueAfter: result.RequeueAfter}, nil
 }
 
-type vaultStatus struct {
-	Initialized bool
-	Sealed      bool
+// vaultClientFactory implements reconciler.VaultClientFactory
+type vaultClientFactory struct {
+	tlsSkipVerify bool
+	timeout       time.Duration
 }
 
-func (r *VaultTransitUnsealReconciler) checkVaultStatus(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) (*vaultStatus, error) {
-	// Get transit token - not used for status check, but verify it exists
-	_, err := r.getTransitToken(ctx, vtu)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get transit token: %w", err)
-	}
-
-	// Create Vault client
-	config := vaultapi.DefaultConfig()
-	// Use pod IP directly to avoid DNS issues
-	config.Address = fmt.Sprintf("http://%s:8200", pod.Status.PodIP)
-
-	client, err := vaultapi.NewClient(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create vault client: %w", err)
-	}
-
-	// Check health
-	health, err := client.Sys().Health()
-	if err != nil {
-		return nil, fmt.Errorf("failed to check vault health: %w", err)
-	}
-
-	return &vaultStatus{
-		Initialized: health.Initialized,
-		Sealed:      health.Sealed,
-	}, nil
-}
-
-func (r *VaultTransitUnsealReconciler) initializeVault(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) error {
-	// Create Vault client
-	config := vaultapi.DefaultConfig()
-	// Use pod IP directly to avoid DNS issues
-	config.Address = fmt.Sprintf("http://%s:8200", pod.Status.PodIP)
-
-	client, err := vaultapi.NewClient(config)
-	if err != nil {
-		return fmt.Errorf("failed to create vault client: %w", err)
-	}
-
-	// Initialize with recovery keys for transit unseal
-	initReq := &vaultapi.InitRequest{
-		RecoveryShares:    vtu.Spec.Initialization.RecoveryShares,
-		RecoveryThreshold: vtu.Spec.Initialization.RecoveryThreshold,
-	}
-
-	initResp, err := client.Sys().Init(initReq)
-	if err != nil {
-		return fmt.Errorf("failed to initialize vault: %w", err)
-	}
-
-	// Store admin token
-	adminSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
-			Namespace: vtu.Spec.VaultPod.Namespace,
-		},
-		Data: map[string][]byte{
-			"token": []byte(initResp.RootToken),
-		},
-	}
-
-	if err := r.createOrUpdateSecret(ctx, adminSecret); err != nil {
-		return fmt.Errorf("failed to store admin token: %w", err)
-	}
-
-	// Store recovery keys
-	keysData := map[string][]byte{
-		"root-token": []byte(initResp.RootToken),
-	}
-	for i, key := range initResp.RecoveryKeysB64 {
-		keysData[fmt.Sprintf("recovery-key-%d", i)] = []byte(key)
-	}
-
-	keysSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      vtu.Spec.Initialization.SecretNames.RecoveryKeys,
-			Namespace: vtu.Spec.VaultPod.Namespace,
-		},
-		Data: keysData,
-	}
-
-	if err := r.createOrUpdateSecret(ctx, keysSecret); err != nil {
-		return fmt.Errorf("failed to store recovery keys: %w", err)
-	}
-
-	r.Log.Info("Vault initialized successfully", "pod", pod.Name)
-	return nil
-}
-
-func (r *VaultTransitUnsealReconciler) getTransitToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) (string, error) {
-	secret := &corev1.Secret{}
-	// Use the VaultPod namespace for the secret, not the VaultTransitUnseal namespace
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      vtu.Spec.TransitVault.SecretRef.Name,
-		Namespace: vtu.Spec.VaultPod.Namespace,
-	}, secret); err != nil {
-		return "", fmt.Errorf("failed to get transit token secret: %w", err)
-	}
-
-	token, ok := secret.Data[vtu.Spec.TransitVault.SecretRef.Key]
-	if !ok {
-		return "", fmt.Errorf("transit token key %s not found in secret", vtu.Spec.TransitVault.SecretRef.Key)
-	}
-
-	return string(token), nil
-}
-
-func (r *VaultTransitUnsealReconciler) createOrUpdateSecret(ctx context.Context, secret *corev1.Secret) error {
-	existing := &corev1.Secret{}
-	err := r.Get(ctx, types.NamespacedName{Name: secret.Name, Namespace: secret.Namespace}, existing)
-	if err != nil && !errors.IsNotFound(err) {
-		return err
-	}
-
-	if errors.IsNotFound(err) {
-		return r.Create(ctx, secret)
-	}
-
-	existing.Data = secret.Data
-	return r.Update(ctx, existing)
-}
-
-func (r *VaultTransitUnsealReconciler) updateCondition(vtu *vaultv1alpha1.VaultTransitUnseal, condType, status, reason, message string) {
-	// Implementation of condition update logic
-	for i := range vtu.Status.Conditions {
-		if vtu.Status.Conditions[i].Type == condType {
-			vtu.Status.Conditions[i].Status = status
-			vtu.Status.Conditions[i].Reason = reason
-			vtu.Status.Conditions[i].Message = message
-			vtu.Status.Conditions[i].LastTransitionTime = metav1.Now().Format(time.RFC3339)
-			return
-		}
-	}
-
-	// Condition not found, add it
-	vtu.Status.Conditions = append(vtu.Status.Conditions, vaultv1alpha1.Condition{
-		Type:               condType,
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now().Format(time.RFC3339),
+func (f *vaultClientFactory) NewClientForPod(pod *corev1.Pod) (vault.Client, error) {
+	return vault.NewClient(&vault.Config{
+		Address:       fmt.Sprintf("http://%s:8200", pod.Status.PodIP),
+		TLSSkipVerify: f.tlsSkipVerify,
+		Timeout:       f.timeout,
 	})
 }
 
-func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&vaultv1alpha1.VaultTransitUnseal{}).
-		Owns(&corev1.Secret{}).
-		Complete(r)
+// secretManager implements reconciler.SecretManager
+type secretManager struct {
+	client client.Client
+	log    logr.Logger
+}
+
+func (s *secretManager) CreateOrUpdate(ctx context.Context, namespace, name string, data map[string][]byte) error {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+	}
+
+	op, err := controllerutil.CreateOrUpdate(ctx, s.client, secret, func() error {
+		secret.Data = data
+		return nil
+	})
+
+	if err != nil {
+		return operrors.NewTransientError("failed to create/update secret", err).
+			WithContext("namespace", namespace).
+			WithContext("name", name)
+	}
+
+	s.log.V(1).Info("Secret operation completed", "operation", op, "namespace", namespace, "name", name)
+	return nil
+}
+
+func (s *secretManager) Get(ctx context.Context, namespace, name, key string) ([]byte, error) {
+	secret := &corev1.Secret{}
+	if err := s.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, secret); err != nil {
+		if errors.IsNotFound(err) {
+			return nil, operrors.NewConfigError("secret not found", err).
+				WithContext("namespace", namespace).
+				WithContext("name", name)
+		}
+		return nil, operrors.NewTransientError("failed to get secret", err).
+			WithContext("namespace", namespace).
+			WithContext("name", name)
+	}
+
+	value, ok := secret.Data[key]
+	if !ok {
+		return nil, operrors.NewConfigError("key not found in secret", nil).
+			WithContext("namespace", namespace).
+			WithContext("name", name).
+			WithContext("key", key)
+	}
+
+	return value, nil
+}
+
+// Helper functions
+
+func calculateBackoff(vtu *vaultv1alpha1.VaultTransitUnseal, defaultDuration time.Duration) time.Duration {
+	// Simple exponential backoff based on failure count
+	// In production, you'd track failure count in status
+	baseInterval := defaultDuration
+	if baseInterval == 0 {
+		baseInterval = 30 * time.Second
+	}
+
+	// Cap at 5 minutes
+	if baseInterval > 5*time.Minute {
+		return 5 * time.Minute
+	}
+
+	return baseInterval
+}
+
+func generateTraceID() string {
+	// Simple trace ID generation
+	// In production, integrate with distributed tracing
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+// RegisterHealthChecks registers health check endpoints
+func RegisterHealthChecks(mgr manager.Manager, checker *health.Checker) error {
+	// Wrap the functions to match the expected interface
+	livenessCheck := func(req *http.Request) error {
+		return checker.Liveness(req.Context())
+	}
+
+	readinessCheck := func(req *http.Request) error {
+		return checker.Readiness(req.Context())
+	}
+
+	if err := mgr.AddHealthzCheck("operator-health", livenessCheck); err != nil {
+		return fmt.Errorf("failed to add liveness check: %w", err)
+	}
+
+	if err := mgr.AddReadyzCheck("operator-ready", readinessCheck); err != nil {
+		return fmt.Errorf("failed to add readiness check: %w", err)
+	}
+
+	return nil
 }

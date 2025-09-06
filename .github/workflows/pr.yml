@@ -1,0 +1,193 @@
+name: PR Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+env:
+  GO_VERSION: '1.25'
+  GOLANGCI_LINT_VERSION: v1.61.0
+
+jobs:
+  validate:
+    name: Validate PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run golangci-lint
+        id: lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: --timeout 5m --out-format=colored-line-number
+          skip-cache: true
+
+      - name: Check code formatting
+        id: fmt
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "formatting_needed=true" >> $GITHUB_OUTPUT
+            echo "## ❌ Code Formatting Issues" >> formatting_report.md
+            echo "" >> formatting_report.md
+            echo "The following files need formatting:" >> formatting_report.md
+            echo "\`\`\`" >> formatting_report.md
+            gofmt -l . >> formatting_report.md
+            echo "\`\`\`" >> formatting_report.md
+            echo "" >> formatting_report.md
+            echo "Please run \`go fmt ./...\` to fix these issues." >> formatting_report.md
+          else
+            echo "formatting_needed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run go vet
+        id: vet
+        run: |
+          if ! go vet ./...; then
+            echo "vet_failed=true" >> $GITHUB_OUTPUT
+          else
+            echo "vet_failed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run gosec security scanner
+        uses: securego/gosec@master
+        with:
+          args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
+
+      - name: Upload gosec results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: gosec-results.sarif
+
+      - name: Check for vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Install dependencies
+        run: |
+          make controller-gen
+          make envtest
+
+      - name: Run unit tests with coverage
+        id: unit_tests
+        run: |
+          if go test ./... -coverprofile=coverage.out -covermode=atomic -race; then
+            echo "unit_tests_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "unit_tests_passed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run integration tests
+        id: integration_tests
+        env:
+          KUBEBUILDER_ASSETS: "${{ github.workspace }}/bin/k8s/1.29.0-linux-amd64"
+        run: |
+          if make test-integration; then
+            echo "integration_tests_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "integration_tests_passed=false" >> $GITHUB_OUTPUT
+          fi
+
+
+      - name: Generate coverage report
+        run: |
+          go tool cover -func=coverage.out > coverage-summary.txt
+          COVERAGE=$(tail -1 coverage-summary.txt | awk '{print $NF}')
+          echo "coverage=$COVERAGE" >> $GITHUB_ENV
+
+      - name: Generate test report
+        if: always()
+        run: |
+          cat > test-report.md << EOF
+          ## Test Results for PR #${{ github.event.pull_request.number }}
+          
+          ### 📊 Summary
+          | Check | Status |
+          |-------|--------|
+          | 🎨 Code Formatting | ${{ steps.fmt.outputs.formatting_needed == 'false' && '✅ Passed' || '❌ Failed' }} |
+          | 🔍 Go Vet | ${{ steps.vet.outputs.vet_failed == 'false' && '✅ Passed' || '❌ Failed' }} |
+          | 🚨 GolangCI-Lint | ${{ steps.lint.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
+          | 🛡️ Security Scan | ✅ Completed (check Security tab) |
+          | 🧪 Unit Tests | ${{ steps.unit_tests.outputs.unit_tests_passed == 'true' && '✅ Passed' || '❌ Failed' }} |
+          | 🔧 Integration Tests | ${{ steps.integration_tests.outputs.integration_tests_passed == 'true' && '✅ Passed' || '❌ Failed' }} |
+          | 📈 Code Coverage | ${COVERAGE:-N/A} |
+          
+          ### 🔗 Links
+          - [Security Scan Results](https://github.com/${{ github.repository }}/security/code-scanning?query=pr%3A${{ github.event.pull_request.number }})
+          
+          EOF
+          
+          if [ "${{ steps.fmt.outputs.formatting_needed }}" == "true" ]; then
+            echo "" >> test-report.md
+            cat formatting_report.md >> test-report.md
+          fi
+
+      - name: Comment PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const testReport = fs.readFileSync('test-report.md', 'utf8');
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('Test Results for PR')
+            );
+            
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: testReport
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: testReport
+              });
+            }
+
+      - name: Fail if tests failed
+        if: |
+          steps.fmt.outputs.formatting_needed == 'true' ||
+          steps.vet.outputs.vet_failed == 'true' ||
+          steps.unit_tests.outputs.unit_tests_passed != 'true' ||
+          steps.integration_tests.outputs.integration_tests_passed != 'true'
+        run: exit 1
