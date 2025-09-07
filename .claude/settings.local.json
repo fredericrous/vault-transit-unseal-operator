@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm:*)",
+      "Bash(go mod:*)",
+      "Bash(go get:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(brew install:*)",
+      "Bash(act pull_request:*)",
+      "Bash(act:*)",
+      "Bash(git add:*)",
+      "WebFetch(domain:gist.github.com)",
+      "Bash(golangci-lint:*)",
+      "Bash(grep:*)",
+      "Bash(go doc:*)",
+      "Bash(KUBEBUILDER_ASSETS=\"$(bin/setup-envtest use 1.29.0 --bin-dir bin -p path)\" go test ./controllers/... -run \"^TestControllers\" -v)",
+      "Bash(ls:*)",
+      "Bash(export KUBEBUILDER_ASSETS=\"$(pwd)/bin/k8s/1.29.0-darwin-amd64\")",
+      "Bash(KUBEBUILDER_ASSETS=\"$(pwd)/../bin/k8s/1.29.0-darwin-amd64\" go test -run \"TestControllers\" -v)",
+      "Bash(KUBEBUILDER_ASSETS=\"$(pwd)/../bin/k8s/1.29.0-darwin-amd64\" go test -run \"TestControllers\" -v)",
+      "Bash(KUBEBUILDER_ASSETS=\"$(pwd)/bin/k8s/1.29.0-darwin-amd64\" go test ./controllers/... -run \"TestControllers\" -v)",
+      "Bash(KUBEBUILDER_ASSETS=\"$(pwd)/bin/k8s/1.29.0-darwin-amd64\" go test ./controllers -run \"TestControllers\" -v)",
+      "Bash(./test.bin)",
+      "Bash(KUBEBUILDER_ASSETS=\"$(bin/setup-envtest use 1.29.0 --bin-dir bin -p path)\" go test ./controllers -v)",
+      "Bash(KUBEBUILDER_ASSETS=\"$(bin/setup-envtest use 1.29.0 --bin-dir bin -p path)\" go test ./controllers -run \"TestControllers/.*should_parse_monitoring_interval\" -v)",
+      "Bash(KUBEBUILDER_ASSETS=\"$(pwd)/bin/k8s/1.29.0-darwin-amd64\" go test ./controllers -timeout 90s -v)",
+      "Bash(KUBEBUILDER_ASSETS=\"$(pwd)/bin/k8s/1.29.0-darwin-amd64\" go test ./controllers -run \"TestControllers.*should.handle.transit.vault.connection.failures\" -timeout 40s -v)",
+      "Bash(KUBEBUILDER_ASSETS=\"$(pwd)/bin/k8s/1.29.0-darwin-amd64\" go test ./controllers -timeout 90s -v)",
+      "Bash(KUBEBUILDER_ASSETS=\"$(pwd)/bin/k8s/1.29.0-darwin-amd64\" go test ./controllers -timeout 90s)",
+      "Bash(KUBEBUILDER_ASSETS=\"$(pwd)/bin/k8s/1.29.0-darwin-amd64\" go test ./controllers -v)"
+    ],
+    "deny": []
+  }
+}

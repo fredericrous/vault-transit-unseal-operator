@@ -39,6 +39,16 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
 
+test-integration: manifests generate fmt vet envtest ## Run integration tests.
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./controllers -run Integration -v -ginkgo.v
+
+test-unit: fmt vet ## Run unit tests only.
+	go test ./api/... ./pkg/... -coverprofile cover.out
+
+test-coverage: test ## Generate test coverage report.
+	go tool cover -html=cover.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
+
 ##@ Build
 
 build: ## Build manager binary.
@@ -79,7 +89,7 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 
 ## Tool Versions
-CONTROLLER_TOOLS_VERSION ?= v0.14.0
+CONTROLLER_TOOLS_VERSION ?= v0.19.0
 
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
 $(CONTROLLER_GEN): $(LOCALBIN)
@@ -89,4 +99,4 @@ envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 
-.PHONY: all help manifests generate fmt vet test build run docker-build docker-push install uninstall deploy undeploy controller-gen envtest
+.PHONY: all help manifests generate fmt vet test test-integration test-unit test-coverage build run docker-build docker-push install uninstall deploy undeploy controller-gen envtest

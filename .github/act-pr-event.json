@@ -1,0 +1,18 @@
+{
+  "pull_request": {
+    "number": 999,
+    "head": {
+      "ref": "test-branch",
+      "sha": "abc123"
+    },
+    "base": {
+      "ref": "main"
+    }
+  },
+  "repository": {
+    "owner": {
+      "login": "fredericrous"
+    },
+    "name": "vault-operator"
+  }
+}
