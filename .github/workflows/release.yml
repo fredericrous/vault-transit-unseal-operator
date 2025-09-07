@@ -142,7 +142,7 @@ jobs:
         run: |
           echo "Waiting for image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} to be available..."
           for i in {1..30}; do
-            if docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} > /dev/null 2>&1; then
+            if docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} > /dev/null 2>&1; then
               echo "Image is available!"
               break
             fi
