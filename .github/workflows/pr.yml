@@ -41,7 +41,7 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
-          args: --timeout 5m --out-format=colored-line-number
+          args: --timeout 5m --out colored-line-number
           skip-cache: true
 
       - name: Check code formatting
@@ -71,6 +71,7 @@ jobs:
           fi
 
       - name: Run gosec security scanner
+        id: gosec
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
           gosec -no-fail -fmt sarif -out gosec-results.sarif ./... || true
@@ -81,7 +82,7 @@ jobs:
 
       - name: Upload gosec results
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: steps.gosec.outcome == 'success'
         with:
           sarif_file: gosec-results.sarif
 
