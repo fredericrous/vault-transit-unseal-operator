@@ -22,13 +22,13 @@ linters:
     - dogsled
     - dupl
     - errcheck
-    - exportloopref
+    - copyloopvar
     - exhaustive
     - gochecknoinits
     - goconst
     - gocritic
     - gocyclo
-    - gomnd
+    - mnd
     - goprintffuncname
     - gosec
     - gosimple
@@ -92,7 +92,7 @@ linters-settings:
   gocyclo:
     min-complexity: 15
 
-  gomnd:
+  mnd:
     checks:
       - argument
       - case
