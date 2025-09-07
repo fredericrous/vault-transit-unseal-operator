@@ -44,27 +44,3 @@ jobs:
       - name: Check licenses
         run: |
           go-licenses check ./... --disallowed_types=forbidden,restricted
-
-  sbom:
-    name: Generate SBOM
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-
-      - name: Generate SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          format: spdx-json
-          output-file: sbom.spdx.json
-
-      - name: Upload SBOM
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: sbom.spdx.json

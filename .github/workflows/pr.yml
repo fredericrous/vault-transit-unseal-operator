@@ -38,7 +38,7 @@ jobs:
 
       - name: Run golangci-lint
         id: lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --timeout 5m --out-format=colored-line-number
@@ -127,7 +127,7 @@ jobs:
         run: |
           cat > test-report.md << EOF
           ## Test Results for PR #${{ github.event.pull_request.number }}
-          
+
           ### 📊 Summary
           | Check | Status |
           |-------|--------|
@@ -138,12 +138,12 @@ jobs:
           | 🧪 Unit Tests | ${{ steps.unit_tests.outputs.unit_tests_passed == 'true' && '✅ Passed' || '❌ Failed' }} |
           | 🔧 Integration Tests | ${{ steps.integration_tests.outputs.integration_tests_passed == 'true' && '✅ Passed' || '❌ Failed' }} |
           | 📈 Code Coverage | ${COVERAGE:-N/A} |
-          
+
           ### 🔗 Links
           - [Security Scan Results](https://github.com/${{ github.repository }}/security/code-scanning?query=pr%3A${{ github.event.pull_request.number }})
-          
+
           EOF
-          
+
           if [ "${{ steps.fmt.outputs.formatting_needed }}" == "true" ]; then
             echo "" >> test-report.md
             cat formatting_report.md >> test-report.md
@@ -157,19 +157,19 @@ jobs:
           script: |
             const fs = require('fs');
             const testReport = fs.readFileSync('test-report.md', 'utf8');
-            
+
             // Find existing comment
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-            
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && 
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
               comment.body.includes('Test Results for PR')
             );
-            
+
             if (botComment) {
               // Update existing comment
               await github.rest.issues.updateComment({
