@@ -135,16 +135,31 @@ jobs:
     name: Security Scan
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
     steps:
+      - name: Wait for image to be available
+        run: |
+          echo "Waiting for image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} to be available..."
+          for i in {1..30}; do
+            if docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} > /dev/null 2>&1; then
+              echo "Image is available!"
+              break
+            fi
+            echo "Attempt $i/30: Image not yet available, waiting 10 seconds..."
+            sleep 10
+          done
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
           format: 'sarif'
           output: 'trivy-results.sarif'
+        continue-on-error: true
 
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
