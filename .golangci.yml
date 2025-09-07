@@ -1,9 +1,19 @@
+# golangci-lint v2 configuration
+version: '2'
+
 run:
   timeout: 5m
   go: '1.25'
   tests: true
   build-tags:
     - integration
+
+# Formatters configuration (v2 feature)
+formatters:
+  gofmt:
+    simplify: true
+  goimports:
+    local-prefixes: github.com/fredericrous/homelab/vault-operator
 
 linters:
   enable:
@@ -18,8 +28,6 @@ linters:
     - goconst
     - gocritic
     - gocyclo
-    - gofmt
-    - goimports
     - gomnd
     - goprintffuncname
     - gosec
@@ -85,9 +93,6 @@ linters-settings:
   gocyclo:
     min-complexity: 15
 
-  goimports:
-    local-prefixes: github.com/fredericrous/homelab/vault-operator
-
   gomnd:
     checks:
       - argument
@@ -146,6 +151,7 @@ issues:
   max-issues-per-linter: 0
   max-same-issues: 0
   new: false
+  exclude-generated: lax  # v2 default is strict, keeping v1 behavior
 
   exclude-rules:
     # Exclude some linters from running on tests files
@@ -160,7 +166,6 @@ issues:
     # Exclude generated files
     - path: zz_generated\.
       linters:
-        - goimports
         - goconst
 
     # Allow unused parameters in interfaces
