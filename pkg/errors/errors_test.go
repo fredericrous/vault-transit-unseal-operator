@@ -82,7 +82,7 @@ func TestErrorHelpers(t *testing.T) {
 
 func TestWithContext(t *testing.T) {
 	err := NewTransientError("operation failed", nil)
-	err.WithContext("pod", "vault-0").
+	err = err.WithContext("pod", "vault-0").
 		WithContext("namespace", "vault").
 		WithContext("attempt", 3)
 

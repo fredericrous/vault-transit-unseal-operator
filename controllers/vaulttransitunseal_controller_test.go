@@ -214,7 +214,7 @@ var _ = Describe("VaultTransitUnseal Controller", func() {
 					Namespace: "vault",
 				},
 			}
-			k8sClient.Delete(ctx, secret)
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
 
 			By("Reconciling without transit token")
 			controllerReconciler := createTestReconciler(k8sClient)
@@ -223,7 +223,7 @@ var _ = Describe("VaultTransitUnseal Controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).To(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 
 			By("Recreating the transit token secret")
 			secret.Data = map[string][]byte{

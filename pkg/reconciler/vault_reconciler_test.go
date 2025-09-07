@@ -23,7 +23,7 @@ import (
 func TestVaultReconciler_Reconcile(t *testing.T) {
 	// Register scheme
 	s := scheme.Scheme
-	vaultv1alpha1.AddToScheme(s)
+	require.NoError(t, vaultv1alpha1.AddToScheme(s))
 
 	tests := []struct {
 		name            string
@@ -323,7 +323,7 @@ func TestVaultReconciler_Reconcile(t *testing.T) {
 func TestVaultReconciler_initializeVault(t *testing.T) {
 	// Register scheme
 	s := scheme.Scheme
-	vaultv1alpha1.AddToScheme(s)
+	require.NoError(t, vaultv1alpha1.AddToScheme(s))
 
 	tests := []struct {
 		name        string

@@ -70,7 +70,7 @@ func (m *MockVaultServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 	}
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `{
+	_, _ = fmt.Fprintf(w, `{
 		"initialized": %t,
 		"sealed": %t,
 		"standby": false,
@@ -86,7 +86,7 @@ func (m *MockVaultServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (m *MockVaultServer) handleSealStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{
+	_, _ = fmt.Fprintf(w, `{
 		"type": "shamir",
 		"initialized": %t,
 		"sealed": %t,
@@ -107,13 +107,13 @@ func (m *MockVaultServer) handleInit(w http.ResponseWriter, r *http.Request) {
 
 	if m.Initialized {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, `{"errors":["Vault is already initialized"]}`)
+		_, _ = fmt.Fprint(w, `{"errors":["Vault is already initialized"]}`)
 		return
 	}
 
 	m.Initialized = true
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{
+	_, _ = fmt.Fprintf(w, `{
 		"root_token": "%s",
 		"recovery_keys_base64": ["%s", "%s", "%s", "%s", "%s"]
 	}`, m.RootToken, m.RecoveryKeys[0], m.RecoveryKeys[1], m.RecoveryKeys[2], m.RecoveryKeys[3], m.RecoveryKeys[4])
@@ -127,7 +127,7 @@ func (m *MockVaultServer) handleUnseal(w http.ResponseWriter, r *http.Request) {
 
 	if !m.Initialized {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, `{"errors":["Vault is not initialized"]}`)
+		_, _ = fmt.Fprint(w, `{"errors":["Vault is not initialized"]}`)
 		return
 	}
 
@@ -138,7 +138,7 @@ func (m *MockVaultServer) handleUnseal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{
+	_, _ = fmt.Fprintf(w, `{
 		"sealed": %t,
 		"t": %d,
 		"n": 5,
@@ -154,7 +154,7 @@ func (m *MockVaultServer) handleTransitEncrypt(w http.ResponseWriter, r *http.Re
 
 	if !m.TransitAvailable {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, `{"errors":["transit engine not mounted"]}`)
+		_, _ = fmt.Fprint(w, `{"errors":["transit engine not mounted"]}`)
 		return
 	}
 
@@ -171,7 +171,7 @@ func (m *MockVaultServer) handleTransitDecrypt(w http.ResponseWriter, r *http.Re
 
 	if !m.TransitAvailable {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, `{"errors":["transit engine not mounted"]}`)
+		_, _ = fmt.Fprint(w, `{"errors":["transit engine not mounted"]}`)
 		return
 	}
 

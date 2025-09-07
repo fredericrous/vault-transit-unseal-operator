@@ -53,9 +53,11 @@ func NewClient(cfg *Config) (Client, error) {
 	vaultConfig.Timeout = cfg.Timeout
 
 	if cfg.TLSSkipVerify {
-		vaultConfig.ConfigureTLS(&vaultapi.TLSConfig{
+		if err := vaultConfig.ConfigureTLS(&vaultapi.TLSConfig{
 			Insecure: true,
-		})
+		}); err != nil {
+			return nil, fmt.Errorf("configuring TLS: %w", err)
+		}
 	}
 
 	apiClient, err := vaultapi.NewClient(vaultConfig)

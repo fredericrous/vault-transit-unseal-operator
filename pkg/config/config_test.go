@@ -90,14 +90,14 @@ func TestLoadConfig(t *testing.T) {
 			oldEnv := make(map[string]string)
 			for k := range tt.env {
 				oldEnv[k] = os.Getenv(k)
-				os.Setenv(k, tt.env[k])
+				require.NoError(t, os.Setenv(k, tt.env[k]))
 			}
 			defer func() {
 				for k, v := range oldEnv {
 					if v == "" {
-						os.Unsetenv(k)
+						require.NoError(t, os.Unsetenv(k))
 					} else {
-						os.Setenv(k, v)
+						require.NoError(t, os.Setenv(k, v))
 					}
 				}
 			}()
@@ -186,8 +186,8 @@ func TestOperatorConfig_Validate(t *testing.T) {
 
 func TestGetEnvHelpers(t *testing.T) {
 	t.Run("getEnvString", func(t *testing.T) {
-		os.Setenv("TEST_STRING", "value")
-		defer os.Unsetenv("TEST_STRING")
+		require.NoError(t, os.Setenv("TEST_STRING", "value"))
+		defer func() { require.NoError(t, os.Unsetenv("TEST_STRING")) }()
 
 		assert.Equal(t, "value", getEnvString("TEST_STRING", "default"))
 		assert.Equal(t, "default", getEnvString("NON_EXISTENT", "default"))
@@ -198,7 +198,7 @@ func TestGetEnvHelpers(t *testing.T) {
 		os.Setenv("TEST_FALSE", "false")
 		os.Setenv("TEST_INVALID", "invalid")
 		defer func() {
-			os.Unsetenv("TEST_TRUE")
+			require.NoError(t, os.Unsetenv("TEST_TRUE"))
 			os.Unsetenv("TEST_FALSE")
 			os.Unsetenv("TEST_INVALID")
 		}()

@@ -143,7 +143,7 @@ func TestCheckStatus(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "/v1/sys/health", r.URL.Path)
 				w.WriteHeader(tt.serverStatus)
-				w.Write([]byte(tt.serverResp))
+				_, _ = w.Write([]byte(tt.serverResp))
 			}))
 			defer server.Close()
 
@@ -221,7 +221,7 @@ func TestInitialize(t *testing.T) {
 				assert.Equal(t, "/v1/sys/init", r.URL.Path)
 				assert.Equal(t, "PUT", r.Method)
 				w.WriteHeader(tt.serverStatus)
-				w.Write([]byte(tt.serverResp))
+				_, _ = w.Write([]byte(tt.serverResp))
 			}))
 			defer server.Close()
 
@@ -272,7 +272,7 @@ func TestIsHealthy(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.serverStatus)
 				if tt.serverStatus == http.StatusOK {
-					w.Write([]byte(`{"initialized":true,"sealed":false,"version":"1.15.0"}`))
+					_, _ = w.Write([]byte(`{"initialized":true,"sealed":false,"version":"1.15.0"}`))
 				}
 			}))
 			defer server.Close()

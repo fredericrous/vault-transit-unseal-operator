@@ -21,7 +21,6 @@ import (
 
 type mockVaultClient struct {
 	healthy bool
-	err     error
 }
 
 func (m *mockVaultClient) CheckStatus(ctx context.Context) (*vault.Status, error) {

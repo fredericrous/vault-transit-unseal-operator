@@ -283,7 +283,7 @@ func (r *VaultReconciler) updateStatus(ctx context.Context, vtu *vaultv1alpha1.V
 
 	patch.Status.LastCheckTime = metav1.Now().Format(time.RFC3339)
 
-	return r.Status().Patch(ctx, patch, client.Apply,
+	return r.Client.Status().Patch(ctx, patch, client.Apply,
 		client.FieldOwner("vault-operator"),
 		client.ForceOwnership)
 }
