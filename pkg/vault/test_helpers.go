@@ -231,7 +231,7 @@ func NewMockVaultClient() *MockVaultClient {
 func (m *MockVaultClient) Init(ctx context.Context, shares, threshold int) (*vaultapi.InitResponse, error) {
 	m.InitCalled = true
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.IsInitialized = true
@@ -249,7 +249,7 @@ func (m *MockVaultClient) Init(ctx context.Context, shares, threshold int) (*vau
 func (m *MockVaultClient) Unseal(ctx context.Context, key string) (*vaultapi.SealStatusResponse, error) {
 	m.UnsealCalled = true
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.IsSealed = false
@@ -264,7 +264,7 @@ func (m *MockVaultClient) Unseal(ctx context.Context, key string) (*vaultapi.Sea
 // SealStatus mocks checking vault seal status
 func (m *MockVaultClient) SealStatus(ctx context.Context) (*vaultapi.SealStatusResponse, error) {
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	return &vaultapi.SealStatusResponse{

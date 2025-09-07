@@ -68,7 +68,7 @@ func (h *Checker) Readiness(ctx context.Context) error {
 	h.mu.Unlock()
 
 	if !result.Ready {
-		return fmt.Errorf(result.Message)
+		return fmt.Errorf("%s", result.Message)
 	}
 	return nil
 }
