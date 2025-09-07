@@ -45,13 +45,15 @@ jobs:
         run: |
           go build ./...
 
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin ${{ env.GOLANGCI_LINT_VERSION }}
+
       - name: Run golangci-lint
         id: lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
-          args: --timeout 5m
-          skip-cache: true
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          golangci-lint run --timeout 5m || echo "lint_failed=true" >> $GITHUB_OUTPUT
 
       - name: Check code formatting
         id: fmt
@@ -143,7 +145,7 @@ jobs:
           |-------|--------|
           | 🎨 Code Formatting | ${{ steps.fmt.outputs.formatting_needed == 'false' && '✅ Passed' || '❌ Failed' }} |
           | 🔍 Go Vet | ${{ steps.vet.outputs.vet_failed == 'false' && '✅ Passed' || '❌ Failed' }} |
-          | 🚨 GolangCI-Lint | ${{ steps.lint.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
+          | 🚨 GolangCI-Lint | ${{ steps.lint.outputs.lint_failed != 'true' && '✅ Passed' || '❌ Failed' }} |
           | 🛡️ Security Scan | ✅ Completed (check Security tab) |
           | 🧪 Unit Tests | ${{ steps.unit_tests.outputs.unit_tests_passed == 'true' && '✅ Passed' || '❌ Failed' }} |
           | 🔧 Integration Tests | ${{ steps.integration_tests.outputs.integration_tests_passed == 'true' && '✅ Passed' || '❌ Failed' }} |

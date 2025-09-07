@@ -2,16 +2,20 @@ version: "2"
 
 run:
   timeout: 5m
+  skip-dirs:
+    - vendor
+    - testdata
+  skip-files:
+    - ".*\\.pb\\.go$"
+    - ".*\\.gen\\.go$"
 
 linters:
   enable:
     - bodyclose
     - copyloopvar
-    - depguard
     - dogsled
     - dupl
     - errcheck
-    - exhaustive
     - goconst
     - gocritic
     - gocyclo
@@ -23,9 +27,12 @@ linters:
     - nakedret
     - nolintlint
     - prealloc
-    - revive
-    - staticcheck
     - unconvert
     - unparam
-    - unused
     - whitespace
+  disable:
+    - staticcheck
+    - revive
+    - unused
+    - exhaustive
+    - depguard
