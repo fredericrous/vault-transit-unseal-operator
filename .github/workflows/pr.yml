@@ -109,9 +109,8 @@ jobs:
 
       - name: Run unit tests with coverage
         id: unit_tests
-        env:
-          KUBEBUILDER_ASSETS: "${{ github.workspace }}/bin/k8s/1.29.0-linux-amd64"
         run: |
+          export KUBEBUILDER_ASSETS="$(${GITHUB_WORKSPACE}/bin/setup-envtest use 1.29.0 --bin-dir ${GITHUB_WORKSPACE}/bin -p path)"
           if go test ./... -coverprofile=coverage.out -covermode=atomic -race; then
             echo "unit_tests_passed=true" >> $GITHUB_OUTPUT
           else
@@ -120,8 +119,6 @@ jobs:
 
       - name: Run integration tests
         id: integration_tests
-        env:
-          KUBEBUILDER_ASSETS: "${{ github.workspace }}/bin/k8s/1.29.0-linux-amd64"
         run: |
           if make test-integration; then
             echo "integration_tests_passed=true" >> $GITHUB_OUTPUT
