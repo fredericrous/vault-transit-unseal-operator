@@ -89,16 +89,15 @@ linters-settings:
     local-prefixes: github.com/fredericrous/homelab/vault-operator
 
   gomnd:
-    settings:
-      mnd:
-        checks:
-          - argument
-          - case
-          - condition
-          - return
+    checks:
+      - argument
+      - case
+      - condition
+      - return
 
   govet:
-    check-shadowing: true
+    enable:
+      - shadow
     enable-all: true
 
   lll:
