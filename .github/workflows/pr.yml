@@ -41,7 +41,7 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
-          args: --timeout 5m --out colored-line-number
+          args: --timeout 5m
           skip-cache: true
 
       - name: Check code formatting
