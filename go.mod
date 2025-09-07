@@ -1,4 +1,4 @@
-module github.com/fredericrous/homelab/vault-operator
+module github.com/fredericrous/homelab/vault-transit-unseal-operator
 
 go 1.25
 

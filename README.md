@@ -1,7 +1,7 @@
 # Vault Transit Unseal Operator
 
 [![CI](https://github.com/fredericrous/homelab/actions/workflows/ci.yml/badge.svg)](https://github.com/fredericrous/homelab/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/fredericrous/homelab/vault-operator)](https://goreportcard.com/report/github.com/fredericrous/homelab/vault-operator)
+[![Go Report Card](https://goreportcard.com/badge/github.com/fredericrous/homelab/vault-transit-unseal-operator)](https://goreportcard.com/report/github.com/fredericrous/homelab/vault-transit-unseal-operator)
 [![License](https://img.shields.io/github/license/fredericrous/homelab)](LICENSE)
 
 A Kubernetes operator that automatically manages Vault initialization and unsealing using HashiCorp Vault's transit unseal feature.
@@ -52,10 +52,10 @@ spec:
 make build
 
 # Build Docker image
-make docker-build IMG=ghcr.io/fredericrous/vault-operator:latest
+make docker-build IMG=ghcr.io/fredericrous/vault-transit-unseal-operator:latest
 
 # Push to registry
-make docker-push IMG=ghcr.io/fredericrous/vault-operator:latest
+make docker-push IMG=ghcr.io/fredericrous/vault-transit-unseal-operator:latest
 ```
 
 ### Deploy to Kubernetes
@@ -69,7 +69,7 @@ kubectl create secret generic vault-transit-token \
 
 2. Deploy the operator:
 ```bash
-kubectl apply -k manifests/core/vault-operator/
+kubectl apply -k manifests/core/vault-transit-unseal-operator/
 ```
 
 3. Create a VaultTransitUnseal resource:
@@ -106,7 +106,7 @@ make test
 
 Check operator logs:
 ```bash
-kubectl logs -n vault-operator deployment/vault-operator
+kubectl logs -n vault-transit-unseal-operator deployment/vault-transit-unseal-operator
 ```
 
 Check the status of VaultTransitUnseal resources:

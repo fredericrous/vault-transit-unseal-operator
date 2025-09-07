@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/fredericrous/vault-operator:latest
+IMG ?= ghcr.io/fredericrous/vault-transit-unseal-operator:latest
 # Kubernetes version for code generation
 KUBE_VERSION ?= 1.29.0
 # Get the currently used golang version
@@ -66,16 +66,16 @@ docker-push: ## Push docker image with the manager.
 ##@ Deployment
 
 install: manifests ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	kubectl apply -f manifests/core/vault-operator/crds/
+	kubectl apply -f manifests/core/vault-transit-unseal-operator/crds/
 
 uninstall: manifests ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
-	kubectl delete -f manifests/core/vault-operator/crds/
+	kubectl delete -f manifests/core/vault-transit-unseal-operator/crds/
 
 deploy: manifests ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	kubectl apply -k manifests/core/vault-operator/
+	kubectl apply -k manifests/core/vault-transit-unseal-operator/
 
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config.
-	kubectl delete -k manifests/core/vault-operator/
+	kubectl delete -k manifests/core/vault-transit-unseal-operator/
 
 ##@ Build Dependencies
 

@@ -3,7 +3,7 @@ set -e
 
 # Configuration
 IMAGE_REGISTRY="${IMAGE_REGISTRY:-ghcr.io/fredericrous}"
-IMAGE_NAME="vault-operator"
+IMAGE_NAME="vault-transit-unseal-operator"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 FULL_IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
 
@@ -22,7 +22,7 @@ echo "Build complete!"
 echo ""
 echo "To deploy to your cluster:"
 echo "  1. Push the image: docker push ${FULL_IMAGE}"
-echo "  2. Deploy operator: kubectl apply -k ../manifests/core/vault-operator/"
+echo "  2. Deploy operator: kubectl apply -k ../manifests/core/vault-transit-unseal-operator/"
 echo "  3. Create transit token secret:"
 echo "     kubectl create secret generic vault-transit-token \\"
 echo "       -n vault \\"
@@ -31,4 +31,4 @@ echo "  4. Apply VaultTransitUnseal resource:"
 echo "     kubectl apply -f ../manifests/core/vault/vault-transit-unseal.yaml"
 echo ""
 echo "To check operator logs:"
-echo "  kubectl logs -n vault-operator deployment/vault-operator -f"
+echo "  kubectl logs -n vault-transit-unseal-operator deployment/vault-transit-unseal-operator -f"
