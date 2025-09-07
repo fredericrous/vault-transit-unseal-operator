@@ -19,9 +19,6 @@ import (
 
 // Integration test suite initialization is done in suite_test.go
 
-// mockVaultPodEnv is used to override the pod IP to localhost for testing
-var mockVaultPodEnv = make(map[string]string)
-
 // ensureControllerSetup ensures the VaultTransitUnseal controller is set up once
 func ensureControllerSetup() {
 	if !controllerSetup {
