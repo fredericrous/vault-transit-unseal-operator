@@ -4,10 +4,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/fredericrous/homelab/vault-operator/pkg/config"
-	"github.com/fredericrous/homelab/vault-operator/pkg/health"
-	"github.com/fredericrous/homelab/vault-operator/pkg/metrics"
-	"github.com/fredericrous/homelab/vault-operator/pkg/reconciler"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/config"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/health"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/metrics"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/reconciler"
 )
 
 // createTestReconciler creates a test reconciler with mock dependencies

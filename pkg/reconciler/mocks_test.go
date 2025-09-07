@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fredericrous/homelab/vault-operator/pkg/vault"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
 	corev1 "k8s.io/api/core/v1"
 )
 

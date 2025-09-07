@@ -10,8 +10,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	vaultv1alpha1 "github.com/fredericrous/homelab/vault-operator/api/v1alpha1"
-	"github.com/fredericrous/homelab/vault-operator/pkg/vault"
+	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
 )
 
 // Checker provides health and readiness checks

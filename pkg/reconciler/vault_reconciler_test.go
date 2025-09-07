@@ -16,8 +16,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	vaultv1alpha1 "github.com/fredericrous/homelab/vault-operator/api/v1alpha1"
-	"github.com/fredericrous/homelab/vault-operator/pkg/vault"
+	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
 )
 
 func TestVaultReconciler_Reconcile(t *testing.T) {

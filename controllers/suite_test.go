@@ -18,7 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	vaultv1alpha1 "github.com/fredericrous/homelab/vault-operator/api/v1alpha1"
+	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 

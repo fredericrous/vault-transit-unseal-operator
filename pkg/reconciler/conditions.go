@@ -3,7 +3,7 @@ package reconciler
 import (
 	"time"
 
-	vaultv1alpha1 "github.com/fredericrous/homelab/vault-operator/api/v1alpha1"
+	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

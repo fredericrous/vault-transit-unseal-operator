@@ -13,7 +13,7 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	vaultv1alpha1 "github.com/fredericrous/homelab/vault-operator/api/v1alpha1"
+	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
 )
 
 // MockVaultServer creates a test HTTP server that mocks Vault API responses

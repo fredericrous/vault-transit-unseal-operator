@@ -12,9 +12,9 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	vaultv1alpha1 "github.com/fredericrous/homelab/vault-operator/api/v1alpha1"
-	operrors "github.com/fredericrous/homelab/vault-operator/pkg/errors"
-	"github.com/fredericrous/homelab/vault-operator/pkg/vault"
+	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
+	operrors "github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/errors"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
 )
 
 // VaultReconciler handles the main reconciliation logic

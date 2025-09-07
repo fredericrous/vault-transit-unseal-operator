@@ -19,13 +19,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	vaultv1alpha1 "github.com/fredericrous/homelab/vault-operator/api/v1alpha1"
-	"github.com/fredericrous/homelab/vault-operator/pkg/config"
-	operrors "github.com/fredericrous/homelab/vault-operator/pkg/errors"
-	"github.com/fredericrous/homelab/vault-operator/pkg/health"
-	"github.com/fredericrous/homelab/vault-operator/pkg/metrics"
-	"github.com/fredericrous/homelab/vault-operator/pkg/reconciler"
-	"github.com/fredericrous/homelab/vault-operator/pkg/vault"
+	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/config"
+	operrors "github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/errors"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/health"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/metrics"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/reconciler"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
 )
 
 // VaultTransitUnsealReconciler reconciles a VaultTransitUnseal object

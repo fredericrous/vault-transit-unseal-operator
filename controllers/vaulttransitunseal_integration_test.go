@@ -11,10 +11,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+
 	// Controller-runtime imports are in suite_test.go
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	vaultv1alpha1 "github.com/fredericrous/homelab/vault-operator/api/v1alpha1"
+	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
 )
 
 // Integration test suite initialization is done in suite_test.go

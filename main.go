@@ -15,9 +15,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	vaultv1alpha1 "github.com/fredericrous/homelab/vault-operator/api/v1alpha1"
-	"github.com/fredericrous/homelab/vault-operator/controllers"
-	"github.com/fredericrous/homelab/vault-operator/pkg/config"
+	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/controllers"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/config"
 )
 
 var (
