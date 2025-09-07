@@ -85,40 +85,43 @@ jobs:
         id: release_notes
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
+          VERSION_TAG=$VERSION  # Keep the v-prefixed version for Git operations
+          VERSION_IMG=${VERSION#v}  # Remove v prefix for Docker image
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          
+          echo "VERSION_IMG=$VERSION_IMG" >> $GITHUB_OUTPUT
+
           # Get previous tag
           PREV_TAG=$(git describe --tags --abbrev=0 $VERSION^ 2>/dev/null || echo "")
-          
+
           if [ -n "$PREV_TAG" ]; then
             echo "PREV_TAG=$PREV_TAG" >> $GITHUB_OUTPUT
             COMMITS=$(git log --pretty=format:"- %s" $PREV_TAG..$VERSION)
           else
             COMMITS=$(git log --pretty=format:"- %s")
           fi
-          
+
           # Create release notes
           cat > release-notes.md << EOF
           ## 🚀 Vault Operator $VERSION
-          
+
           ### Docker Image
           \`\`\`bash
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION_IMG
           \`\`\`
-          
+
           ### Installation
           \`\`\`bash
           # Update kustomization.yaml
-          cd manifests/core/vault-operator
-          kustomize edit set image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION
-          
+          cd manifests/core/vault-transit-unseal-operator
+          kustomize edit set image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION_IMG
+
           # Deploy
           kubectl apply -k .
           \`\`\`
-          
+
           ### What's Changed
           $COMMITS
-          
+
           ### Full Changelog
           ${PREV_TAG:+https://github.com/${{ github.repository }}/compare/$PREV_TAG...$VERSION}
           EOF
@@ -138,11 +141,18 @@ jobs:
     permissions:
       security-events: write
     steps:
+      - name: Extract version
+        id: version
+        run: |
+          # Remove 'v' prefix from tag
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Wait for image to be available
         run: |
-          echo "Waiting for image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} to be available..."
+          echo "Waiting for image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} to be available..."
           for i in {1..30}; do
-            if docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} > /dev/null 2>&1; then
+            if docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} > /dev/null 2>&1; then
               echo "Image is available!"
               break
             fi
@@ -153,7 +163,7 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM'

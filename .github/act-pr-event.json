@@ -13,6 +13,6 @@
     "owner": {
       "login": "fredericrous"
     },
-    "name": "vault-operator"
+    "name": "vault-transit-unseal-operator"
   }
 }

@@ -29,7 +29,7 @@ func TestLoadConfig(t *testing.T) {
 				EnableTLSValidation:     true,
 				MetricsAddr:             ":8080",
 				ProbeAddr:               ":8081",
-				LeaderElectionID:        "vault-operator",
+				LeaderElectionID:        "vault-transit-unseal-operator",
 			},
 			wantErr: false,
 		},

@@ -70,7 +70,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("Starting vault-operator",
+	setupLog.Info("Starting vault-transit-unseal-operator",
 		"namespace", cfg.Namespace,
 		"metricsAddr", cfg.MetricsAddr,
 		"probeAddr", cfg.ProbeAddr,
@@ -91,7 +91,7 @@ func main() {
 	}
 
 	// Create the recorder for events
-	recorder := mgr.GetEventRecorderFor("vault-operator")
+	recorder := mgr.GetEventRecorderFor("vault-transit-unseal-operator")
 
 	// Setup controller with new architecture
 	if err = setupController(mgr, cfg, recorder); err != nil {

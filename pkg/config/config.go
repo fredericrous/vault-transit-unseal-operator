@@ -47,7 +47,7 @@ func LoadConfig() (*OperatorConfig, error) {
 		// Server settings
 		MetricsAddr:      getEnvString("METRICS_ADDR", ":8080"),
 		ProbeAddr:        getEnvString("PROBE_ADDR", ":8081"),
-		LeaderElectionID: getEnvString("LEADER_ELECTION_ID", "vault-operator"),
+		LeaderElectionID: getEnvString("LEADER_ELECTION_ID", "vault-transit-unseal-operator"),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -69,7 +69,7 @@ func NewDefaultConfig() *OperatorConfig {
 		EnableTLSValidation:     true,
 		MetricsAddr:             ":8080",
 		ProbeAddr:               ":8081",
-		LeaderElectionID:        "vault-operator",
+		LeaderElectionID:        "vault-transit-unseal-operator",
 	}
 }
 

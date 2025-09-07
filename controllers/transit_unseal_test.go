@@ -206,7 +206,7 @@ func TestHomelabScenario(t *testing.T) {
 	k8sVaultUnseal := &vaultv1alpha1.VaultTransitUnseal{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "k8s-vault-transit-unseal",
-			Namespace: "vault-operator",
+			Namespace: "vault-transit-unseal-operator",
 		},
 		Spec: vaultv1alpha1.VaultTransitUnsealSpec{
 			VaultPod: vaultv1alpha1.VaultPodSpec{
