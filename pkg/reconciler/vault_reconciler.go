@@ -274,6 +274,10 @@ func (r *VaultReconciler) updateConditions(vtu *vaultv1alpha1.VaultTransitUnseal
 func (r *VaultReconciler) updateStatus(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) error {
 	// Use SSA for conflict-free updates
 	patch := &vaultv1alpha1.VaultTransitUnseal{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: vaultv1alpha1.GroupVersion.String(),
+			Kind:       "VaultTransitUnseal",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      vtu.Name,
 			Namespace: vtu.Namespace,
