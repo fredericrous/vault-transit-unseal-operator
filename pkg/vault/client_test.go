@@ -296,7 +296,7 @@ func TestClientWithToken(t *testing.T) {
 		// Verify token is set in header
 		assert.Equal(t, expectedToken, r.Header.Get("X-Vault-Token"))
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"initialized":true,"sealed":false}`))
+		_, _ = w.Write([]byte(`{"initialized":true,"sealed":false}`))
 	}))
 	defer server.Close()
 
@@ -320,7 +320,7 @@ func TestClientWithNamespace(t *testing.T) {
 		// Verify namespace is set in header
 		assert.Equal(t, expectedNamespace, r.Header.Get("X-Vault-Namespace"))
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"initialized":true,"sealed":false}`))
+		_, _ = w.Write([]byte(`{"initialized":true,"sealed":false}`))
 	}))
 	defer server.Close()
 

@@ -194,13 +194,13 @@ func TestGetEnvHelpers(t *testing.T) {
 	})
 
 	t.Run("getEnvBool", func(t *testing.T) {
-		os.Setenv("TEST_TRUE", "true")
-		os.Setenv("TEST_FALSE", "false")
-		os.Setenv("TEST_INVALID", "invalid")
+		require.NoError(t, os.Setenv("TEST_TRUE", "true"))
+		require.NoError(t, os.Setenv("TEST_FALSE", "false"))
+		require.NoError(t, os.Setenv("TEST_INVALID", "invalid"))
 		defer func() {
 			require.NoError(t, os.Unsetenv("TEST_TRUE"))
-			os.Unsetenv("TEST_FALSE")
-			os.Unsetenv("TEST_INVALID")
+			_ = os.Unsetenv("TEST_FALSE")
+			_ = os.Unsetenv("TEST_INVALID")
 		}()
 
 		assert.True(t, getEnvBool("TEST_TRUE", false))
@@ -210,11 +210,11 @@ func TestGetEnvHelpers(t *testing.T) {
 	})
 
 	t.Run("getEnvInt", func(t *testing.T) {
-		os.Setenv("TEST_INT", "42")
-		os.Setenv("TEST_INVALID", "invalid")
+		require.NoError(t, os.Setenv("TEST_INT", "42"))
+		require.NoError(t, os.Setenv("TEST_INVALID", "invalid"))
 		defer func() {
-			os.Unsetenv("TEST_INT")
-			os.Unsetenv("TEST_INVALID")
+			_ = os.Unsetenv("TEST_INT")
+			_ = os.Unsetenv("TEST_INVALID")
 		}()
 
 		assert.Equal(t, 42, getEnvInt("TEST_INT", 10))
@@ -223,11 +223,11 @@ func TestGetEnvHelpers(t *testing.T) {
 	})
 
 	t.Run("getEnvDuration", func(t *testing.T) {
-		os.Setenv("TEST_DURATION", "5m")
-		os.Setenv("TEST_INVALID", "invalid")
+		require.NoError(t, os.Setenv("TEST_DURATION", "5m"))
+		require.NoError(t, os.Setenv("TEST_INVALID", "invalid"))
 		defer func() {
-			os.Unsetenv("TEST_DURATION")
-			os.Unsetenv("TEST_INVALID")
+			_ = os.Unsetenv("TEST_DURATION")
+			_ = os.Unsetenv("TEST_INVALID")
 		}()
 
 		assert.Equal(t, 5*time.Minute, getEnvDuration("TEST_DURATION", time.Hour))

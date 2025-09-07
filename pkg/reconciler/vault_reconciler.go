@@ -83,7 +83,8 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 
 	if len(pods) == 0 {
 		log.Info("No Vault pods found, requeueing")
-		result.RequeueAfter = 30 * time.Second
+		checkInterval, _ := time.ParseDuration(vtu.Spec.Monitoring.CheckInterval)
+		result.RequeueAfter = checkInterval
 		return result
 	}
 
@@ -272,22 +273,9 @@ func (r *VaultReconciler) updateConditions(vtu *vaultv1alpha1.VaultTransitUnseal
 }
 
 func (r *VaultReconciler) updateStatus(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) error {
-	// Use SSA for conflict-free updates
-	patch := &vaultv1alpha1.VaultTransitUnseal{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: vaultv1alpha1.GroupVersion.String(),
-			Kind:       "VaultTransitUnseal",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      vtu.Name,
-			Namespace: vtu.Namespace,
-		},
-		Status: vtu.Status,
-	}
+	// Update the status with timestamp
+	vtu.Status.LastCheckTime = metav1.Now().Format(time.RFC3339)
 
-	patch.Status.LastCheckTime = metav1.Now().Format(time.RFC3339)
-
-	return r.Client.Status().Patch(ctx, patch, client.Apply,
-		client.FieldOwner("vault-operator"),
-		client.ForceOwnership)
+	// Use Status().Update() for status updates
+	return r.Client.Status().Update(ctx, vtu)
 }

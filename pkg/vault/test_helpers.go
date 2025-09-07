@@ -160,7 +160,7 @@ func (m *MockVaultServer) handleTransitEncrypt(w http.ResponseWriter, r *http.Re
 
 	// Mock encryption - in real tests you might want to parse the request
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `{"data":{"ciphertext":"vault:v1:mock_encrypted_data"}}`)
+	_, _ = fmt.Fprint(w, `{"data":{"ciphertext":"vault:v1:mock_encrypted_data"}}`)
 }
 
 func (m *MockVaultServer) handleTransitDecrypt(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +177,7 @@ func (m *MockVaultServer) handleTransitDecrypt(w http.ResponseWriter, r *http.Re
 
 	// Mock decryption - return a base64 encoded test key
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `{"data":{"plaintext":"dGVzdC11bnNlYWwta2V5"}}`)
+	_, _ = fmt.Fprint(w, `{"data":{"plaintext":"dGVzdC11bnNlYWwta2V5"}}`)
 }
 
 // TestClientBuilder helps create test clients for unit testing
