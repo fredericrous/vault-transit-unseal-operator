@@ -109,6 +109,8 @@ jobs:
 
       - name: Run unit tests with coverage
         id: unit_tests
+        env:
+          KUBEBUILDER_ASSETS: "${{ github.workspace }}/bin/k8s/1.29.0-linux-amd64"
         run: |
           if go test ./... -coverprofile=coverage.out -covermode=atomic -race; then
             echo "unit_tests_passed=true" >> $GITHUB_OUTPUT

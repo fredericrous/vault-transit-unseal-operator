@@ -1,38 +1,7 @@
 version: "2"
 
-run:
-  timeout: 5m
-  skip-dirs:
-    - vendor
-    - testdata
-  skip-files:
-    - ".*\\.pb\\.go$"
-    - ".*\\.gen\\.go$"
-
-linters:
-  enable:
-    - bodyclose
-    - copyloopvar
-    - dogsled
-    - dupl
-    - errcheck
-    - goconst
-    - gocritic
-    - gocyclo
-    - gosec
-    - govet
-    - ineffassign
-    - misspell
-    - mnd
-    - nakedret
-    - nolintlint
-    - prealloc
-    - unconvert
-    - unparam
-    - whitespace
-  disable:
-    - staticcheck
-    - revive
-    - unused
-    - exhaustive
-    - depguard
+output:
+  show-stats: true
+  sort-order:
+    - file
+    - linter

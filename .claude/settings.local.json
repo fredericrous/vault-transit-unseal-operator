@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm:*)",
+      "Bash(go mod:*)",
+      "Bash(go get:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(brew install:*)",
+      "Bash(act pull_request:*)",
+      "Bash(act:*)",
+      "Bash(git add:*)",
+      "WebFetch(domain:gist.github.com)",
+      "Bash(golangci-lint:*)",
+      "Bash(grep:*)"
+    ],
+    "deny": []
+  }
+}
