@@ -155,6 +155,10 @@ type secretManager struct {
 }
 
 func (s *secretManager) CreateOrUpdate(ctx context.Context, namespace, name string, data map[string][]byte) error {
+	return s.CreateOrUpdateWithOptions(ctx, namespace, name, data, nil)
+}
+
+func (s *secretManager) CreateOrUpdateWithOptions(ctx context.Context, namespace, name string, data map[string][]byte, annotations map[string]string) error {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -163,6 +167,17 @@ func (s *secretManager) CreateOrUpdate(ctx context.Context, namespace, name stri
 	}
 
 	op, err := controllerutil.CreateOrUpdate(ctx, s.client, secret, func() error {
+		// Preserve existing annotations
+		if secret.Annotations == nil {
+			secret.Annotations = make(map[string]string)
+		}
+
+		// Apply provided annotations
+		for k, v := range annotations {
+			secret.Annotations[k] = v
+		}
+
+		// Set data
 		secret.Data = data
 		return nil
 	})
@@ -173,7 +188,11 @@ func (s *secretManager) CreateOrUpdate(ctx context.Context, namespace, name stri
 			WithContext("name", name)
 	}
 
-	s.log.V(1).Info("Secret operation completed", "operation", op, "namespace", namespace, "name", name)
+	s.log.V(1).Info("Secret operation completed",
+		"operation", op,
+		"namespace", namespace,
+		"name", name,
+		"annotationCount", len(annotations))
 	return nil
 }
 

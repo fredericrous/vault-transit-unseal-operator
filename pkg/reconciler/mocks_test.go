@@ -61,6 +61,10 @@ func newMockSecretManager() *mockSecretManager {
 }
 
 func (m *mockSecretManager) CreateOrUpdate(ctx context.Context, namespace, name string, data map[string][]byte) error {
+	return m.CreateOrUpdateWithOptions(ctx, namespace, name, data, nil)
+}
+
+func (m *mockSecretManager) CreateOrUpdateWithOptions(ctx context.Context, namespace, name string, data map[string][]byte, annotations map[string]string) error {
 	m.calls = append(m.calls, fmt.Sprintf("CreateOrUpdate:%s/%s", namespace, name))
 	if m.createErr != nil {
 		return m.createErr
