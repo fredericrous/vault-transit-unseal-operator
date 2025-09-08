@@ -67,6 +67,14 @@ type SecretNamesSpec struct {
 	// Name for recovery keys secret
 	// +kubebuilder:default=vault-keys
 	RecoveryKeys string `json:"recoveryKeys,omitempty"`
+
+	// Annotations to add to the admin token secret
+	// +optional
+	AdminTokenAnnotations map[string]string `json:"adminTokenAnnotations,omitempty"`
+
+	// Annotations to add to the recovery keys secret
+	// +optional
+	RecoveryKeysAnnotations map[string]string `json:"recoveryKeysAnnotations,omitempty"`
 }
 
 // MonitoringSpec defines monitoring parameters

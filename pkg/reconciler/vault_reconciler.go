@@ -35,6 +35,7 @@ type VaultClientFactory interface {
 // SecretManager handles K8s secret operations
 type SecretManager interface {
 	CreateOrUpdate(ctx context.Context, namespace, name string, data map[string][]byte) error
+	CreateOrUpdateWithOptions(ctx context.Context, namespace, name string, data map[string][]byte, annotations map[string]string) error
 	Get(ctx context.Context, namespace, name, key string) ([]byte, error)
 }
 
@@ -189,14 +190,15 @@ func (r *VaultReconciler) initializeVault(ctx context.Context, vaultClient vault
 func (r *VaultReconciler) storeSecrets(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, initResp *vault.InitResponse) error {
 	namespace := vtu.Spec.VaultPod.Namespace
 
-	// Store admin token
-	if err := r.SecretManager.CreateOrUpdate(ctx, namespace,
+	// Store admin token with annotations if provided
+	if err := r.SecretManager.CreateOrUpdateWithOptions(ctx, namespace,
 		vtu.Spec.Initialization.SecretNames.AdminToken,
-		map[string][]byte{"token": []byte(initResp.RootToken)}); err != nil {
+		map[string][]byte{"token": []byte(initResp.RootToken)},
+		vtu.Spec.Initialization.SecretNames.AdminTokenAnnotations); err != nil {
 		return fmt.Errorf("storing admin token: %w", err)
 	}
 
-	// Store recovery keys
+	// Store recovery keys with annotations if provided
 	keysData := map[string][]byte{
 		"root-token": []byte(initResp.RootToken),
 	}
@@ -204,9 +206,10 @@ func (r *VaultReconciler) storeSecrets(ctx context.Context, vtu *vaultv1alpha1.V
 		keysData[fmt.Sprintf("recovery-key-%d", i)] = []byte(key)
 	}
 
-	if err := r.SecretManager.CreateOrUpdate(ctx, namespace,
+	if err := r.SecretManager.CreateOrUpdateWithOptions(ctx, namespace,
 		vtu.Spec.Initialization.SecretNames.RecoveryKeys,
-		keysData); err != nil {
+		keysData,
+		vtu.Spec.Initialization.SecretNames.RecoveryKeysAnnotations); err != nil {
 		return fmt.Errorf("storing recovery keys: %w", err)
 	}
 
