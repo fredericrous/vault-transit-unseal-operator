@@ -68,6 +68,11 @@ type SecretNamesSpec struct {
 	// +kubebuilder:default=vault-keys
 	RecoveryKeys string `json:"recoveryKeys,omitempty"`
 
+	// Store recovery keys in a secret
+	// Set to false for production environments where recovery keys should be handled outside of Kubernetes
+	// +kubebuilder:default=false
+	StoreRecoveryKeys bool `json:"storeRecoveryKeys,omitempty"`
+
 	// Annotations to add to the admin token secret
 	// +optional
 	AdminTokenAnnotations map[string]string `json:"adminTokenAnnotations,omitempty"`

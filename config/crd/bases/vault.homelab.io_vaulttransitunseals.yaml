@@ -72,6 +72,12 @@ spec:
                           type: string
                         description: Annotations to add to the recovery keys secret
                         type: object
+                      storeRecoveryKeys:
+                        default: false
+                        description: |-
+                          Store recovery keys in a secret
+                          Set to false for production environments where recovery keys should be handled outside of Kubernetes
+                        type: boolean
                     type: object
                 type: object
               monitoring:

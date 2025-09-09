@@ -1,123 +1,83 @@
 # Vault Transit Unseal Operator
 
-[![CI](https://github.com/fredericrous/homelab/actions/workflows/ci.yml/badge.svg)](https://github.com/fredericrous/homelab/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/fredericrous/homelab/vault-transit-unseal-operator)](https://goreportcard.com/report/github.com/fredericrous/homelab/vault-transit-unseal-operator)
-[![License](https://img.shields.io/github/license/fredericrous/homelab)](LICENSE)
+Automatically manages HashiCorp Vault initialization and unsealing using transit unseal in Kubernetes.
 
-A Kubernetes operator that automatically manages Vault initialization and unsealing using HashiCorp Vault's transit unseal feature.
+## Quick Start
 
-## Features
+1. **Create transit token secret**
+   ```bash
+   kubectl create secret generic vault-transit-token \
+     -n vault \
+     --from-literal=token=<YOUR_TRANSIT_TOKEN>
+   ```
 
-- Automatically detects uninitialized Vault pods
-- Initializes Vault with transit unseal configuration
-- Stores admin tokens and recovery keys in Kubernetes secrets
-- Monitors Vault pod status continuously
-- Handles multiple Vault instances
+2. **Deploy the operator**
+   ```bash
+   kubectl apply -k github.com/fredericrous/vault-transit-unseal-operator/config/default
+   ```
 
-## Architecture
+3. **Configure your Vault**
+   ```yaml
+   apiVersion: vault.homelab.io/v1alpha1
+   kind: VaultTransitUnseal
+   metadata:
+     name: vault-main
+     namespace: vault
+   spec:
+     vaultPod:
+       namespace: vault
+       selector:
+         app: vault
+     transitVault:
+       address: http://transit-vault:8200
+       secretRef:
+         name: vault-transit-token
+     postUnsealConfig:
+       enableKV: true
+       enableExternalSecretsOperator: true  # Auto-configures ESO access
+       externalSecretsOperatorConfig:
+         policyName: "external-secrets-operator"
+         kubernetesAuth:
+           roleName: "external-secrets-operator"
+           serviceAccounts:
+           - name: external-secrets
+             namespace: external-secrets
+     initialization:
+       secretNames:
+         storeRecoveryKeys: false  # Set to true only for dev/testing
+         adminTokenAnnotations:
+           # Works with Reflector for cross-namespace secret sync
+           reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+           reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: "external-secrets,argocd"
+           reflector.v1.k8s.emberstack.com/reflection-auto-enabled: "true"
+           # Works with Reloader to restart pods when secrets change
+           reloader.stakater.com/match: "true"
+   ```
 
-The operator watches for `VaultTransitUnseal` custom resources and manages the corresponding Vault pods:
+## What It Does
 
-```yaml
-apiVersion: vault.homelab.io/v1alpha1
-kind: VaultTransitUnseal
-metadata:
-  name: vault-main
-  namespace: vault
-spec:
-  vaultPod:
-    namespace: vault
-    selector:
-      app.kubernetes.io/name: vault
-  transitVault:
-    address: http://192.168.1.42:61200
-    secretRef:
-      name: vault-transit-token
-      key: token
-```
+- Watches for uninitialized Vault pods
+- Initializes them with transit unseal 
+- Stores admin tokens in Kubernetes secrets with custom annotations
+- Auto-configures External Secrets Operator access (policies, auth, roles)
+- Sets up KV v2 engine at `/secret`
+- Supports Reflector (cross-namespace sync) and Reloader (pod restarts)
 
-## Building and Deployment
+## Secrets Created
 
-### Prerequisites
+The operator creates these secrets in the same namespace as your Vault:
 
-- Go 1.21+
-- Docker
-- kubectl with cluster access
-- make
+- `vault-admin-token`: Contains the root token for Vault admin access
+- `vault-keys`: Contains the recovery keys (only if `storeRecoveryKeys: true`)
 
-### Build the Operator
+**Security Note**: By default, recovery keys are NOT stored in Kubernetes (`storeRecoveryKeys: false`). Instead, they appear once in the operator logs during initialization - capture and store them securely elsewhere. Only set to `true` for dev/test environments.
 
-```bash
-# Build locally
-make build
+## Requirements
 
-# Build Docker image
-make docker-build IMG=ghcr.io/fredericrous/vault-transit-unseal-operator:latest
+- Kubernetes 1.24+
+- A transit Vault instance for unsealing
+- Vault pods deployed in your cluster
 
-# Push to registry
-make docker-push IMG=ghcr.io/fredericrous/vault-transit-unseal-operator:latest
-```
+## License
 
-### Deploy to Kubernetes
-
-1. Create the transit token secret:
-```bash
-kubectl create secret generic vault-transit-token \
-  -n vault \
-  --from-literal=token=<YOUR_TRANSIT_TOKEN>
-```
-
-2. Deploy the operator (CRDs are installed automatically on startup):
-```bash
-kubectl apply -k manifests/core/vault-transit-unseal-operator/
-```
-
-3. Create a VaultTransitUnseal resource:
-```bash
-kubectl apply -f manifests/core/vault/vault-transit-unseal.yaml
-```
-
-## Development
-
-### Run locally
-```bash
-# Install CRDs
-make install
-
-# Run operator locally
-make run
-```
-
-### Run tests
-```bash
-make test
-```
-
-## How It Works
-
-1. The operator watches for `VaultTransitUnseal` resources
-2. For each resource, it finds matching Vault pods using the provided selector
-3. It checks if Vault is initialized and unsealed
-4. If not initialized, it initializes Vault with transit unseal configuration
-5. It stores the admin token and recovery keys in Kubernetes secrets
-6. It continuously monitors the Vault pod status
-
-## Troubleshooting
-
-Check operator logs:
-```bash
-kubectl logs -n vault-transit-unseal-operator deployment/vault-transit-unseal-operator
-```
-
-Check the status of VaultTransitUnseal resources:
-```bash
-kubectl get vaulttransitunseal -A
-kubectl describe vaulttransitunseal vault-main -n vault
-```
-
-## Security Considerations
-
-- The transit token is stored as a Kubernetes secret
-- Admin tokens and recovery keys are stored as Kubernetes secrets
-- Use RBAC to restrict access to these secrets
-- Consider using sealed secrets or external secret operators for additional security
+MIT

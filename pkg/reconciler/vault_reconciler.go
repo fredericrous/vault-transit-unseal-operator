@@ -240,19 +240,26 @@ func (r *VaultReconciler) storeSecrets(ctx context.Context, vtu *vaultv1alpha1.V
 		return fmt.Errorf("storing admin token: %w", err)
 	}
 
-	// Store recovery keys with annotations if provided
-	keysData := map[string][]byte{
-		"root-token": []byte(initResp.RootToken),
-	}
-	for i, key := range initResp.RecoveryKeysB64 {
-		keysData[fmt.Sprintf("recovery-key-%d", i)] = []byte(key)
-	}
+	// Store recovery keys only if enabled
+	if vtu.Spec.Initialization.SecretNames.StoreRecoveryKeys {
+		keysData := map[string][]byte{
+			"root-token": []byte(initResp.RootToken),
+		}
+		for i, key := range initResp.RecoveryKeysB64 {
+			keysData[fmt.Sprintf("recovery-key-%d", i)] = []byte(key)
+		}
 
-	if err := r.SecretManager.CreateOrUpdateWithOptions(ctx, namespace,
-		vtu.Spec.Initialization.SecretNames.RecoveryKeys,
-		keysData,
-		vtu.Spec.Initialization.SecretNames.RecoveryKeysAnnotations); err != nil {
-		return fmt.Errorf("storing recovery keys: %w", err)
+		if err := r.SecretManager.CreateOrUpdateWithOptions(ctx, namespace,
+			vtu.Spec.Initialization.SecretNames.RecoveryKeys,
+			keysData,
+			vtu.Spec.Initialization.SecretNames.RecoveryKeysAnnotations); err != nil {
+			return fmt.Errorf("storing recovery keys: %w", err)
+		}
+	} else {
+		r.Log.Info("Recovery keys storage disabled - keys must be recorded securely outside of Kubernetes")
+		// Log recovery keys to operator logs (they'll appear once and can be captured)
+		r.Log.Info("IMPORTANT: Recovery keys generated. Store them securely and delete these logs:", 
+			"recoveryKeys", initResp.RecoveryKeysB64)
 	}
 
 	return nil
