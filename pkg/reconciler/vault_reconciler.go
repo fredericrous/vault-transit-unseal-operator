@@ -13,7 +13,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/configuration"
 	operrors "github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/errors"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/transit"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
 )
 
@@ -25,6 +27,7 @@ type VaultReconciler struct {
 	VaultFactory    VaultClientFactory
 	SecretManager   SecretManager
 	MetricsRecorder MetricsRecorder
+	Configurator    *configuration.Configurator
 }
 
 // VaultClientFactory creates Vault clients
@@ -156,6 +159,45 @@ func (r *VaultReconciler) processPod(ctx context.Context, pod *corev1.Pod, vtu *
 	// Update conditions
 	r.updateConditions(vtu, status)
 
+	// If vault is sealed, attempt to unseal it
+	if status.Sealed && status.Initialized {
+		if err := r.unsealVault(ctx, vaultClient, vtu); err != nil {
+			return fmt.Errorf("unsealing vault: %w", err)
+		}
+
+		// Re-check status after unseal
+		status, err = vaultClient.CheckStatus(ctx)
+		if err != nil {
+			return fmt.Errorf("checking vault status after unseal: %w", err)
+		}
+
+		// Update metrics after unseal
+		r.MetricsRecorder.RecordVaultStatus(status.Initialized, status.Sealed)
+	}
+
+	// If vault is unsealed and initialized, apply post-unseal configuration
+	if !status.Sealed && status.Initialized && (vtu.Spec.PostUnsealConfig.EnableKV || vtu.Spec.PostUnsealConfig.EnableExternalSecretsOperator) && r.Configurator != nil {
+		log := r.Log.WithValues("pod", pod.Name)
+		log.V(1).Info("Applying post-unseal configuration")
+
+		// Get the admin token if available
+		adminToken, err := r.getAdminToken(ctx, vtu)
+		if err != nil {
+			log.Error(err, "Failed to get admin token for configuration, skipping")
+			return nil
+		}
+
+		// Create a new client with admin token
+		apiClient := vaultClient.GetAPIClient()
+		apiClient.SetToken(string(adminToken))
+
+		// Apply configuration
+		if err := r.Configurator.Configure(ctx, apiClient, vtu.Spec.PostUnsealConfig, &vtu.Status.ConfigurationStatus); err != nil {
+			log.Error(err, "Failed to apply post-unseal configuration")
+			// Don't fail the reconciliation for configuration errors
+		}
+	}
+
 	return nil
 }
 
@@ -281,4 +323,53 @@ func (r *VaultReconciler) updateStatus(ctx context.Context, vtu *vaultv1alpha1.V
 
 	// Use Status().Update() for status updates
 	return r.Client.Status().Update(ctx, vtu)
+}
+
+func (r *VaultReconciler) unsealVault(ctx context.Context, vaultClient vault.Client, vtu *vaultv1alpha1.VaultTransitUnseal) error {
+	log := r.Log.WithName("unseal")
+
+	// Get transit token
+	transitToken, err := r.SecretManager.Get(ctx,
+		vtu.Spec.VaultPod.Namespace,
+		vtu.Spec.TransitVault.SecretRef.Name,
+		vtu.Spec.TransitVault.SecretRef.Key)
+	if err != nil {
+		return fmt.Errorf("getting transit token: %w", err)
+	}
+
+	// Create transit client
+	transitClient, err := transit.NewClient(
+		vtu.Spec.TransitVault.Address,
+		string(transitToken),
+		vtu.Spec.TransitVault.KeyName,
+		vtu.Spec.TransitVault.MountPath,
+		vtu.Spec.TransitVault.TLSSkipVerify,
+		log)
+	if err != nil {
+		return fmt.Errorf("creating transit client: %w", err)
+	}
+
+	// Attempt to unseal
+	if err := transitClient.UnsealVault(ctx, vaultClient.GetAPIClient()); err != nil {
+		return fmt.Errorf("unsealing vault: %w", err)
+	}
+
+	if r.Recorder != nil {
+		r.Recorder.Event(vtu, corev1.EventTypeNormal, "Unsealed", "Vault unsealed successfully")
+	}
+
+	return nil
+}
+
+func (r *VaultReconciler) getAdminToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) ([]byte, error) {
+	// Try to get the admin token from the secret
+	token, err := r.SecretManager.Get(ctx,
+		vtu.Spec.VaultPod.Namespace,
+		vtu.Spec.Initialization.SecretNames.AdminToken,
+		"token")
+	if err != nil {
+		return nil, fmt.Errorf("getting admin token: %w", err)
+	}
+
+	return token, nil
 }

@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: vaulttransitunseals.vault.homelab.io
 spec:
   group: vault.homelab.io
@@ -85,6 +85,79 @@ spec:
                     default: 10s
                     description: Retry interval for failed operations
                     type: string
+                type: object
+              postUnsealConfig:
+                description: Post-unseal configuration
+                properties:
+                  enableExternalSecretsOperator:
+                    default: true
+                    description: Enable External Secrets Operator configuration
+                    type: boolean
+                  enableKV:
+                    default: true
+                    description: Enable KV v2 secret engine
+                    type: boolean
+                  externalSecretsOperatorConfig:
+                    description: External Secrets Operator configuration
+                    properties:
+                      kubernetesAuth:
+                        description: Kubernetes auth configuration
+                        properties:
+                          maxTTL:
+                            default: 24h
+                            description: Default max TTL
+                            type: string
+                          roleName:
+                            default: external-secrets-operator
+                            description: Role name
+                            type: string
+                          serviceAccounts:
+                            description: Service accounts that can authenticate
+                            items:
+                              description: ServiceAccountRef references a service
+                                account
+                              properties:
+                                name:
+                                  description: Service account name
+                                  type: string
+                                namespace:
+                                  description: Namespace
+                                  type: string
+                              required:
+                              - name
+                              - namespace
+                              type: object
+                            type: array
+                          ttl:
+                            default: 24h
+                            description: Default TTL
+                            type: string
+                        type: object
+                      policyName:
+                        default: external-secrets-operator
+                        description: Policy name
+                        type: string
+                    type: object
+                  kvConfig:
+                    description: KV engine configuration
+                    properties:
+                      deleteVersionAfter:
+                        default: 30d
+                        description: Delete version after duration (e.g., "30d")
+                        type: string
+                      maxVersions:
+                        default: 5
+                        description: Max versions to keep
+                        type: integer
+                      path:
+                        default: secret
+                        description: Mount path for KV engine
+                        type: string
+                      version:
+                        default: 2
+                        description: KV version
+                        type: integer
+                    type: object
                 type: object
               transitVault:
                 description: Transit Vault configuration
@@ -172,6 +245,22 @@ spec:
                   - type
                   type: object
                 type: array
+              configurationStatus:
+                description: Configuration status
+                properties:
+                  externalSecretsOperatorConfigured:
+                    description: External Secrets Operator configured
+                    type: boolean
+                  externalSecretsOperatorConfiguredTime:
+                    description: Last time ESO was configured
+                    type: string
+                  kvConfigured:
+                    description: KV engine configured
+                    type: boolean
+                  kvConfiguredTime:
+                    description: Last time KV was configured
+                    type: string
+                type: object
               initialized:
                 description: Whether Vault is initialized
                 type: boolean

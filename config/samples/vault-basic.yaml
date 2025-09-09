@@ -1,0 +1,31 @@
+apiVersion: vault.homelab.io/v1alpha1
+kind: VaultTransitUnseal
+metadata:
+  name: vault-transit-unseal
+  namespace: vault
+spec:
+  vaultPod:
+    namespace: vault
+    selector:
+      app.kubernetes.io/name: vault
+      app.kubernetes.io/component: server
+  
+  transitVault:
+    address: "http://192.168.1.42:61200"
+    secretRef:
+      name: vault-transit-token
+      key: token
+    keyName: "k8s-vault"
+    mountPath: "transit"
+    tlsSkipVerify: true
+  
+  initialization:
+    recoveryShares: 1
+    recoveryThreshold: 1
+    secretNames:
+      adminToken: vault-admin-token
+      recoveryKeys: vault-keys
+  
+  monitoring:
+    checkInterval: "30s"
+    retryInterval: "10s"

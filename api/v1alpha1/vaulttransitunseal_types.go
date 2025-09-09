@@ -88,6 +88,79 @@ type MonitoringSpec struct {
 	RetryInterval string `json:"retryInterval,omitempty"`
 }
 
+// PostUnsealConfig defines configuration to apply after unsealing
+type PostUnsealConfig struct {
+	// Enable KV v2 secret engine
+	// +kubebuilder:default=true
+	EnableKV bool `json:"enableKV,omitempty"`
+
+	// Enable External Secrets Operator configuration
+	// +kubebuilder:default=true
+	EnableExternalSecretsOperator bool `json:"enableExternalSecretsOperator,omitempty"`
+
+	// KV engine configuration
+	KVConfig KVConfig `json:"kvConfig,omitempty"`
+
+	// External Secrets Operator configuration
+	ExternalSecretsOperatorConfig ExternalSecretsOperatorConfig `json:"externalSecretsOperatorConfig,omitempty"`
+}
+
+// KVConfig defines KV engine configuration
+type KVConfig struct {
+	// Mount path for KV engine
+	// +kubebuilder:default="secret"
+	Path string `json:"path,omitempty"`
+
+	// KV version
+	// +kubebuilder:default=2
+	Version int `json:"version,omitempty"`
+
+	// Max versions to keep
+	// +kubebuilder:default=5
+	MaxVersions int `json:"maxVersions,omitempty"`
+
+	// Delete version after duration (e.g., "30d")
+	// +kubebuilder:default="30d"
+	DeleteVersionAfter string `json:"deleteVersionAfter,omitempty"`
+}
+
+// ExternalSecretsOperatorConfig defines ESO configuration
+type ExternalSecretsOperatorConfig struct {
+	// Policy name
+	// +kubebuilder:default="external-secrets-operator"
+	PolicyName string `json:"policyName,omitempty"`
+
+	// Kubernetes auth configuration
+	KubernetesAuth KubernetesAuthConfig `json:"kubernetesAuth,omitempty"`
+}
+
+// KubernetesAuthConfig defines Kubernetes auth configuration
+type KubernetesAuthConfig struct {
+	// Role name
+	// +kubebuilder:default="external-secrets-operator"
+	RoleName string `json:"roleName,omitempty"`
+
+	// Service accounts that can authenticate
+	ServiceAccounts []ServiceAccountRef `json:"serviceAccounts,omitempty"`
+
+	// Default TTL
+	// +kubebuilder:default="24h"
+	TTL string `json:"ttl,omitempty"`
+
+	// Default max TTL
+	// +kubebuilder:default="24h"
+	MaxTTL string `json:"maxTTL,omitempty"`
+}
+
+// ServiceAccountRef references a service account
+type ServiceAccountRef struct {
+	// Service account name
+	Name string `json:"name"`
+
+	// Namespace
+	Namespace string `json:"namespace"`
+}
+
 // VaultTransitUnsealSpec defines the desired state of VaultTransitUnseal
 type VaultTransitUnsealSpec struct {
 	// Vault pods to manage
@@ -101,6 +174,9 @@ type VaultTransitUnsealSpec struct {
 
 	// Monitoring parameters
 	Monitoring MonitoringSpec `json:"monitoring,omitempty"`
+
+	// Post-unseal configuration
+	PostUnsealConfig PostUnsealConfig `json:"postUnsealConfig,omitempty"`
 }
 
 // Condition represents the state of a VaultTransitUnseal at a certain point
@@ -132,8 +208,26 @@ type VaultTransitUnsealStatus struct {
 	// Last time Vault status was checked
 	LastCheckTime string `json:"lastCheckTime,omitempty"`
 
+	// Configuration status
+	ConfigurationStatus ConfigurationStatus `json:"configurationStatus,omitempty"`
+
 	// Current conditions
 	Conditions []Condition `json:"conditions,omitempty"`
+}
+
+// ConfigurationStatus tracks post-unseal configuration
+type ConfigurationStatus struct {
+	// KV engine configured
+	KVConfigured bool `json:"kvConfigured,omitempty"`
+
+	// Last time KV was configured
+	KVConfiguredTime string `json:"kvConfiguredTime,omitempty"`
+
+	// External Secrets Operator configured
+	ExternalSecretsOperatorConfigured bool `json:"externalSecretsOperatorConfigured,omitempty"`
+
+	// Last time ESO was configured
+	ExternalSecretsOperatorConfiguredTime string `json:"externalSecretsOperatorConfiguredTime,omitempty"`
 }
 
 //+kubebuilder:object:root=true

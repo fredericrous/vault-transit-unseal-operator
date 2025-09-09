@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr/testr"
+	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +34,10 @@ func (m *mockVaultClient) Initialize(ctx context.Context, shares, threshold int)
 
 func (m *mockVaultClient) IsHealthy(ctx context.Context) bool {
 	return m.healthy
+}
+
+func (m *mockVaultClient) GetAPIClient() *vaultapi.Client {
+	return nil
 }
 
 type mockVaultClientFactory struct {

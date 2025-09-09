@@ -14,6 +14,7 @@ type Client interface {
 	CheckStatus(ctx context.Context) (*Status, error)
 	Initialize(ctx context.Context, recoveryShares, recoveryThreshold int) (*InitResponse, error)
 	IsHealthy(ctx context.Context) bool
+	GetAPIClient() *vaultapi.Client
 }
 
 // Status represents Vault server status
@@ -123,4 +124,8 @@ func (c *client) Initialize(ctx context.Context, recoveryShares, recoveryThresho
 func (c *client) IsHealthy(ctx context.Context) bool {
 	_, err := c.api.Sys().HealthWithContext(ctx)
 	return err == nil
+}
+
+func (c *client) GetAPIClient() *vaultapi.Client {
+	return c.api
 }

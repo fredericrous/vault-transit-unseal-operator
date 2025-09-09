@@ -1,0 +1,64 @@
+apiVersion: vault.homelab.io/v1alpha1
+kind: VaultTransitUnseal
+metadata:
+  name: vault-transit-unseal
+  namespace: vault
+spec:
+  vaultPod:
+    namespace: vault
+    selector:
+      app.kubernetes.io/name: vault
+      app.kubernetes.io/component: server
+  
+  transitVault:
+    address: "http://192.168.1.42:61200"
+    secretRef:
+      name: vault-transit-token
+      key: token
+    keyName: "k8s-vault"
+    mountPath: "transit"
+    tlsSkipVerify: true
+  
+  initialization:
+    recoveryShares: 1
+    recoveryThreshold: 1
+    secretNames:
+      adminToken: vault-admin-token
+      recoveryKeys: vault-keys
+      # Reflector annotations for admin token
+      adminTokenAnnotations:
+        reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+        reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: "external-secrets,postgres,haproxy-controller"
+        reflector.v1.k8s.emberstack.com/reflection-auto-enabled: "true"
+      
+      # Optional: annotations for recovery keys
+      recoveryKeysAnnotations:
+        app.kubernetes.io/managed-by: "vault-transit-unseal-operator"
+  
+  monitoring:
+    checkInterval: "30s"
+    retryInterval: "10s"
+  
+  # NEW: Post-unseal configuration
+  postUnsealConfig:
+    # Enable KV v2 secret engine
+    enableKV: true
+    kvConfig:
+      path: "secret"
+      version: 2
+      maxVersions: 5
+      deleteVersionAfter: "30d"
+    
+    # Enable External Secrets Operator configuration
+    enableExternalSecretsOperator: true
+    externalSecretsOperatorConfig:
+      policyName: "external-secrets-operator"
+      kubernetesAuth:
+        roleName: "external-secrets-operator"
+        serviceAccounts:
+          - name: external-secrets
+            namespace: external-secrets
+          - name: external-secrets-operator
+            namespace: external-secrets
+        ttl: "24h"
+        maxTTL: "24h"

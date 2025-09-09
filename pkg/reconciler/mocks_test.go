@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
+	vaultapi "github.com/hashicorp/vault/api"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -33,6 +34,10 @@ func (m *mockVaultClient) Initialize(ctx context.Context, shares, threshold int)
 
 func (m *mockVaultClient) IsHealthy(ctx context.Context) bool {
 	return m.healthy
+}
+
+func (m *mockVaultClient) GetAPIClient() *vaultapi.Client {
+	return nil
 }
 
 type mockVaultClientFactory struct {

@@ -21,6 +21,7 @@ import (
 
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/config"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/configuration"
 	operrors "github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/errors"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/health"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/metrics"
@@ -61,6 +62,9 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		log:    r.Log.WithName("secrets"),
 	}
 
+	// Create configurator
+	configurator := configuration.NewConfigurator(r.Log.WithName("configurator"))
+
 	// Create vault reconciler with all dependencies
 	r.VaultReconciler = &reconciler.VaultReconciler{
 		Client:          r.Client,
@@ -69,6 +73,7 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		VaultFactory:    vaultFactory,
 		SecretManager:   secretMgr,
 		MetricsRecorder: metricsRecorder,
+		Configurator:    configurator,
 	}
 
 	// Create health checker
