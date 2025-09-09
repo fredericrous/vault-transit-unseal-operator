@@ -152,6 +152,8 @@ path "auth/token/lookup-self" {
 			return fmt.Errorf("failed to enable Kubernetes auth: %w", err)
 		}
 		c.log.Info("Enabled Kubernetes auth method")
+	} else {
+		c.log.Info("Kubernetes auth method already enabled")
 	}
 
 	// Configure Kubernetes auth

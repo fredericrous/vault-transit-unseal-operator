@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ import (
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/controllers"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/config"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/crd"
 )
 
 var (
@@ -77,6 +79,14 @@ func main() {
 		"enableLeaderElection", cfg.EnableLeaderElection,
 		"maxConcurrentReconciles", cfg.MaxConcurrentReconciles,
 	)
+
+	// Install/Update CRDs
+	setupLog.Info("Installing CRDs")
+	restConfig := ctrl.GetConfigOrDie()
+	if err := crd.InstallCRDs(context.Background(), restConfig); err != nil {
+		setupLog.Error(err, "Failed to install CRDs")
+		os.Exit(1)
+	}
 
 	// Create manager
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{

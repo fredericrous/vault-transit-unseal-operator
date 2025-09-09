@@ -67,7 +67,7 @@ kubectl create secret generic vault-transit-token \
   --from-literal=token=<YOUR_TRANSIT_TOKEN>
 ```
 
-2. Deploy the operator:
+2. Deploy the operator (CRDs are installed automatically on startup):
 ```bash
 kubectl apply -k manifests/core/vault-transit-unseal-operator/
 ```
