@@ -8,8 +8,8 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/util/yaml"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -20,7 +20,7 @@ var crds embed.FS
 // InstallCRDs installs or updates CRDs from embedded files
 func InstallCRDs(ctx context.Context, cfg *rest.Config) error {
 	logger := log.FromContext(ctx)
-	
+
 	// Create apiextensions client
 	apiextClient, err := clientset.NewForConfig(cfg)
 	if err != nil {

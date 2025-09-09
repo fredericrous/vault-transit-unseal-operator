@@ -208,9 +208,10 @@ func (r *VaultReconciler) initializeVault(ctx context.Context, vaultClient vault
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		log.Info("Initializing Vault")
 
-		initResp, err := vaultClient.Initialize(ctx,
-			vtu.Spec.Initialization.RecoveryShares,
-			vtu.Spec.Initialization.RecoveryThreshold)
+		initResp, err := vaultClient.Initialize(ctx, &vault.InitRequest{
+			RecoveryShares:    vtu.Spec.Initialization.RecoveryShares,
+			RecoveryThreshold: vtu.Spec.Initialization.RecoveryThreshold,
+		})
 		if err != nil {
 			return err
 		}
@@ -258,7 +259,7 @@ func (r *VaultReconciler) storeSecrets(ctx context.Context, vtu *vaultv1alpha1.V
 	} else {
 		r.Log.Info("Recovery keys storage disabled - keys must be recorded securely outside of Kubernetes")
 		// Log recovery keys to operator logs (they'll appear once and can be captured)
-		r.Log.Info("IMPORTANT: Recovery keys generated. Store them securely and delete these logs:", 
+		r.Log.Info("IMPORTANT: Recovery keys generated. Store them securely and delete these logs:",
 			"recoveryKeys", initResp.RecoveryKeysB64)
 	}
 

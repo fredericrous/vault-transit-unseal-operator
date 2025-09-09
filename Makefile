@@ -37,6 +37,9 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 test: manifests generate fmt vet envtest ## Run tests.
+	@echo "Setting up envtest binaries..."
+	@test -d $(LOCALBIN) || mkdir -p $(LOCALBIN)
+	@test -f $(ENVTEST) || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
 
 test-integration: manifests generate fmt vet envtest ## Run integration tests.
@@ -48,6 +51,9 @@ test-unit: fmt vet ## Run unit tests only.
 test-coverage: test ## Generate test coverage report.
 	go tool cover -html=cover.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
+
+test-coverage-business: ## Generate test coverage for business logic only (excluding infrastructure).
+	@./scripts/coverage.sh
 
 ##@ Build
 

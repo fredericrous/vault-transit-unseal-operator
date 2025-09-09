@@ -28,8 +28,32 @@ func (m *mockVaultClient) CheckStatus(ctx context.Context) (*vault.Status, error
 	return &vault.Status{Initialized: true, Sealed: false}, nil
 }
 
-func (m *mockVaultClient) Initialize(ctx context.Context, shares, threshold int) (*vault.InitResponse, error) {
+func (m *mockVaultClient) Initialize(ctx context.Context, req *vault.InitRequest) (*vault.InitResponse, error) {
 	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockVaultClient) EnableAuth(ctx context.Context, path, authType string) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (m *mockVaultClient) AuthEnabled(ctx context.Context, path string) (bool, error) {
+	return false, fmt.Errorf("not implemented")
+}
+
+func (m *mockVaultClient) WriteAuth(ctx context.Context, path string, data map[string]interface{}) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (m *mockVaultClient) MountExists(ctx context.Context, path string) (bool, error) {
+	return false, fmt.Errorf("not implemented")
+}
+
+func (m *mockVaultClient) MountSecretEngine(ctx context.Context, path string, input *vault.MountInput) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (m *mockVaultClient) WritePolicy(ctx context.Context, name, policy string) error {
+	return fmt.Errorf("not implemented")
 }
 
 func (m *mockVaultClient) IsHealthy(ctx context.Context) bool {

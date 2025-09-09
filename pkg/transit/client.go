@@ -20,6 +20,14 @@ type Client struct {
 
 // NewClient creates a new transit client
 func NewClient(address, token, keyName, mountPath string, tlsSkipVerify bool, log logr.Logger) (*Client, error) {
+	if token == "" {
+		return nil, fmt.Errorf("transit token cannot be empty")
+	}
+
+	if address == "" {
+		return nil, fmt.Errorf("vault address cannot be empty")
+	}
+
 	config := vaultapi.DefaultConfig()
 	config.Address = address
 	config.Timeout = 30 * time.Second
@@ -89,6 +97,10 @@ func (c *Client) UnsealVault(ctx context.Context, targetClient *vaultapi.Client)
 
 // EncryptData encrypts data using transit engine
 func (c *Client) EncryptData(ctx context.Context, plaintext string) (string, error) {
+	if plaintext == "" {
+		return "", fmt.Errorf("plaintext cannot be empty")
+	}
+
 	path := fmt.Sprintf("%s/encrypt/%s", c.mountPath, c.keyName)
 
 	data := map[string]interface{}{
@@ -98,6 +110,10 @@ func (c *Client) EncryptData(ctx context.Context, plaintext string) (string, err
 	secret, err := c.api.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
 		return "", fmt.Errorf("encrypting data: %w", err)
+	}
+
+	if secret == nil || secret.Data == nil {
+		return "", fmt.Errorf("no data returned from transit engine")
 	}
 
 	ciphertext, ok := secret.Data["ciphertext"].(string)
@@ -119,6 +135,10 @@ func (c *Client) DecryptData(ctx context.Context, ciphertext string) (string, er
 	secret, err := c.api.Logical().WriteWithContext(ctx, path, data)
 	if err != nil {
 		return "", fmt.Errorf("decrypting data: %w", err)
+	}
+
+	if secret == nil || secret.Data == nil {
+		return "", fmt.Errorf("no data returned from transit engine")
 	}
 
 	plaintextB64, ok := secret.Data["plaintext"].(string)
