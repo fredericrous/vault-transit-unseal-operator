@@ -166,6 +166,30 @@ type ServiceAccountRef struct {
 	Namespace string `json:"namespace"`
 }
 
+// ArgoCDSpec defines ArgoCD integration settings
+type ArgoCDSpec struct {
+	// Enable ArgoCD integration
+	// When enabled, CRDs will be managed by ArgoCD instead of the operator
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled,omitempty"`
+
+	// ArgoCD namespace
+	// +kubebuilder:default="argocd"
+	Namespace string `json:"namespace,omitempty"`
+
+	// Application name that manages this operator's CRDs
+	// If specified, operator will wait for this application to be healthy
+	ApplicationName string `json:"applicationName,omitempty"`
+
+	// Skip CRD installation when ArgoCD integration is enabled
+	// +kubebuilder:default=true
+	SkipCRDInstall bool `json:"skipCRDInstall,omitempty"`
+
+	// Wait timeout for ArgoCD application to be ready
+	// +kubebuilder:default="5m"
+	WaitTimeout string `json:"waitTimeout,omitempty"`
+}
+
 // VaultTransitUnsealSpec defines the desired state of VaultTransitUnseal
 type VaultTransitUnsealSpec struct {
 	// Vault pods to manage
@@ -182,6 +206,9 @@ type VaultTransitUnsealSpec struct {
 
 	// Post-unseal configuration
 	PostUnsealConfig PostUnsealConfig `json:"postUnsealConfig,omitempty"`
+
+	// ArgoCD integration settings
+	ArgoCD *ArgoCDSpec `json:"argocd,omitempty"`
 }
 
 // Condition represents the state of a VaultTransitUnseal at a certain point

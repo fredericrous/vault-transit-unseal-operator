@@ -12,6 +12,7 @@ type OperatorConfig struct {
 	// Feature flags
 	EnableMetrics        bool
 	EnableLeaderElection bool
+	SkipCRDInstall       bool
 
 	// Operational settings
 	ReconcileTimeout        time.Duration
@@ -34,6 +35,7 @@ func LoadConfig() (*OperatorConfig, error) {
 		// Feature flags with defaults
 		EnableMetrics:        getEnvBool("ENABLE_METRICS", true),
 		EnableLeaderElection: getEnvBool("ENABLE_LEADER_ELECTION", false),
+		SkipCRDInstall:       getEnvBool("SKIP_CRD_INSTALL", false),
 
 		// Operational settings
 		ReconcileTimeout:        getEnvDuration("RECONCILE_TIMEOUT", 5*time.Minute),
@@ -62,6 +64,7 @@ func NewDefaultConfig() *OperatorConfig {
 	return &OperatorConfig{
 		EnableMetrics:           true,
 		EnableLeaderElection:    false,
+		SkipCRDInstall:          false,
 		ReconcileTimeout:        5 * time.Minute,
 		MaxConcurrentReconciles: 3,
 		Namespace:               "vault",

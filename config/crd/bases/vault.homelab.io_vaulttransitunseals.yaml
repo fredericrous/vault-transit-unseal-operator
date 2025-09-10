@@ -40,6 +40,34 @@ spec:
           spec:
             description: VaultTransitUnsealSpec defines the desired state of VaultTransitUnseal
             properties:
+              argocd:
+                description: ArgoCD integration settings
+                properties:
+                  applicationName:
+                    description: |-
+                      Application name that manages this operator's CRDs
+                      If specified, operator will wait for this application to be healthy
+                    type: string
+                  enabled:
+                    default: false
+                    description: |-
+                      Enable ArgoCD integration
+                      When enabled, CRDs will be managed by ArgoCD instead of the operator
+                    type: boolean
+                  namespace:
+                    default: argocd
+                    description: ArgoCD namespace
+                    type: string
+                  skipCRDInstall:
+                    default: true
+                    description: Skip CRD installation when ArgoCD integration is
+                      enabled
+                    type: boolean
+                  waitTimeout:
+                    default: 5m
+                    description: Wait timeout for ArgoCD application to be ready
+                    type: string
+                type: object
               initialization:
                 description: Initialization parameters
                 properties:

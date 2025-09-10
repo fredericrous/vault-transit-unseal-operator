@@ -5,12 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -80,12 +84,29 @@ func main() {
 		"maxConcurrentReconciles", cfg.MaxConcurrentReconciles,
 	)
 
-	// Install/Update CRDs
-	setupLog.Info("Installing CRDs")
-	restConfig := ctrl.GetConfigOrDie()
-	if err := crd.InstallCRDs(context.Background(), restConfig); err != nil {
-		setupLog.Error(err, "Failed to install CRDs")
-		os.Exit(1)
+	// Install/Update CRDs if not skipped
+	skipCRDInstall := cfg.SkipCRDInstall
+	
+	// Check if we should skip CRD install based on environment detection
+	if !skipCRDInstall && isRunningInArgoCD() {
+		setupLog.Info("Detected ArgoCD environment, skipping CRD installation")
+		skipCRDInstall = true
+	}
+	
+	if !skipCRDInstall {
+		setupLog.Info("Installing CRDs")
+		restConfig := ctrl.GetConfigOrDie()
+		if err := crd.InstallCRDs(context.Background(), restConfig); err != nil {
+			// Check if it's a permission error
+			if strings.Contains(err.Error(), "forbidden") || strings.Contains(err.Error(), "cannot get resource") {
+				setupLog.Info("CRD installation skipped due to permissions. Assuming CRDs are managed externally.")
+			} else {
+				setupLog.Error(err, "Failed to install CRDs")
+				os.Exit(1)
+			}
+		}
+	} else {
+		setupLog.Info("CRD installation skipped")
 	}
 
 	// Create manager
@@ -144,4 +165,88 @@ func setupController(mgr manager.Manager, cfg *config.OperatorConfig, recorder r
 	}
 
 	return nil
+}
+
+// isRunningInArgoCD checks if the operator is running in an ArgoCD-managed environment
+func isRunningInArgoCD() bool {
+	ctx := context.Background()
+	
+	// First, check environment variables that ArgoCD might set
+	// These are not standard but could be set by users
+	if os.Getenv("ARGOCD_MANAGED") == "true" {
+		return true
+	}
+	
+	// Try to detect if we're running in a pod with ArgoCD labels
+	namespace := os.Getenv("POD_NAMESPACE")
+	podName := os.Getenv("POD_NAME")
+	
+	if namespace == "" || podName == "" {
+		// Try to read from downward API files
+		if nsBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+			namespace = strings.TrimSpace(string(nsBytes))
+		}
+		// For pod name, we'd need downward API volume mount
+		if podName == "" {
+			podName = os.Getenv("HOSTNAME") // Often the pod name
+		}
+	}
+	
+	// If we still don't have namespace/pod info, we can't check labels
+	if namespace == "" || podName == "" {
+		return false
+	}
+	
+	// Create a minimal k8s client to check our own pod
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		setupLog.V(1).Info("Failed to get in-cluster config for ArgoCD detection", "error", err)
+		return false
+	}
+	
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		setupLog.V(1).Info("Failed to create k8s client for ArgoCD detection", "error", err)
+		return false
+	}
+	
+	// Check our own pod for ArgoCD labels
+	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		setupLog.V(1).Info("Failed to get pod for ArgoCD detection", "error", err)
+		return false
+	}
+	
+	// Check for common ArgoCD labels
+	labels := pod.GetLabels()
+	annotations := pod.GetAnnotations()
+	
+	// Standard ArgoCD managed resource labels
+	if _, hasAppInstance := labels["app.kubernetes.io/instance"]; hasAppInstance {
+		if _, hasArgocdApp := labels["argocd.argoproj.io/instance"]; hasArgocdApp {
+			return true
+		}
+	}
+	
+	// Check annotations
+	if _, hasManaged := annotations["argocd.argoproj.io/sync-options"]; hasManaged {
+		return true
+	}
+	
+	// Check if the namespace has ArgoCD application
+	if apps, err := clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/managed-by=argocd",
+	}); err == nil && len(apps.Items) > 0 {
+		return true
+	}
+	
+	// Check if ArgoCD is installed in the cluster
+	if _, err := clientset.CoreV1().Namespaces().Get(ctx, "argocd", metav1.GetOptions{}); err == nil {
+		// ArgoCD namespace exists, check if we have any ArgoCD applications managing our namespace
+		// This would require ArgoCD Application API access, which we might not have
+		// For now, just note that ArgoCD is present
+		setupLog.V(1).Info("ArgoCD namespace detected in cluster")
+	}
+	
+	return false
 }
