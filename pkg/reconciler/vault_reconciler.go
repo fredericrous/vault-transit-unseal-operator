@@ -67,7 +67,7 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 	}()
 
 	// Validate transit token exists
-	if err := r.validateTransitToken(ctx, vtu); err != nil {
+	if err := r.ValidateTransitToken(ctx, vtu); err != nil {
 		if r.Recorder != nil {
 			r.Recorder.Event(vtu, corev1.EventTypeWarning, "InvalidConfig", err.Error())
 		}
@@ -77,7 +77,7 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 	}
 
 	// Find Vault pods
-	pods, err := r.findVaultPods(ctx, vtu)
+	pods, err := r.FindVaultPods(ctx, vtu)
 	if err != nil {
 		result.Error = operrors.NewTransientError("failed to find vault pods", err).
 			WithContext("namespace", vtu.Spec.VaultPod.Namespace).
@@ -95,7 +95,7 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 	// Process each pod
 	allHealthy := true
 	for _, pod := range pods {
-		if err := r.processPod(ctx, &pod, vtu); err != nil {
+		if err := r.ProcessPod(ctx, &pod, vtu); err != nil {
 			log.Error(err, "Failed to process pod", "pod", pod.Name)
 			allHealthy = false
 			if r.Recorder != nil {
@@ -124,7 +124,8 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 	return result
 }
 
-func (r *VaultReconciler) processPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) error {
+// ProcessPod handles processing of a single vault pod
+func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) error {
 	if !r.isPodReady(pod) {
 		return fmt.Errorf("pod not ready")
 	}
@@ -149,7 +150,7 @@ func (r *VaultReconciler) processPod(ctx context.Context, pod *corev1.Pod, vtu *
 
 	// Handle initialization if needed
 	if !status.Initialized {
-		if err := r.initializeVault(ctx, vaultClient, pod, vtu); err != nil {
+		if err := r.InitializeVault(ctx, vaultClient, pod, vtu); err != nil {
 			r.MetricsRecorder.RecordInitialization(false)
 			return fmt.Errorf("initializing vault: %w", err)
 		}
@@ -161,7 +162,7 @@ func (r *VaultReconciler) processPod(ctx context.Context, pod *corev1.Pod, vtu *
 
 	// If vault is sealed, attempt to unseal it
 	if status.Sealed && status.Initialized {
-		if err := r.unsealVault(ctx, vaultClient, vtu); err != nil {
+		if err := r.UnsealVault(ctx, vaultClient, vtu); err != nil {
 			return fmt.Errorf("unsealing vault: %w", err)
 		}
 
@@ -181,7 +182,7 @@ func (r *VaultReconciler) processPod(ctx context.Context, pod *corev1.Pod, vtu *
 		log.V(1).Info("Applying post-unseal configuration")
 
 		// Get the admin token if available
-		adminToken, err := r.getAdminToken(ctx, vtu)
+		adminToken, err := r.GetAdminToken(ctx, vtu)
 		if err != nil {
 			log.Error(err, "Failed to get admin token for configuration, skipping")
 			return nil
@@ -201,7 +202,8 @@ func (r *VaultReconciler) processPod(ctx context.Context, pod *corev1.Pod, vtu *
 	return nil
 }
 
-func (r *VaultReconciler) initializeVault(ctx context.Context, vaultClient vault.Client, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) error {
+// InitializeVault initializes a new vault instance
+func (r *VaultReconciler) InitializeVault(ctx context.Context, vaultClient vault.Client, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) error {
 	log := r.Log.WithValues("pod", pod.Name)
 
 	// Use retry for idempotency
@@ -217,7 +219,7 @@ func (r *VaultReconciler) initializeVault(ctx context.Context, vaultClient vault
 		}
 
 		// Store secrets
-		if err := r.storeSecrets(ctx, vtu, initResp); err != nil {
+		if err := r.StoreSecrets(ctx, vtu, initResp); err != nil {
 			return fmt.Errorf("storing secrets: %w", err)
 		}
 
@@ -230,7 +232,8 @@ func (r *VaultReconciler) initializeVault(ctx context.Context, vaultClient vault
 	})
 }
 
-func (r *VaultReconciler) storeSecrets(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, initResp *vault.InitResponse) error {
+// StoreSecrets stores initialization secrets in Kubernetes
+func (r *VaultReconciler) StoreSecrets(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, initResp *vault.InitResponse) error {
 	namespace := vtu.Spec.VaultPod.Namespace
 
 	// Store admin token with annotations if provided
@@ -280,7 +283,8 @@ func (r *VaultReconciler) isPodReady(pod *corev1.Pod) bool {
 	return false
 }
 
-func (r *VaultReconciler) findVaultPods(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) ([]corev1.Pod, error) {
+// FindVaultPods finds vault pods matching the selector
+func (r *VaultReconciler) FindVaultPods(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) ([]corev1.Pod, error) {
 	podList := &corev1.PodList{}
 	if err := r.List(ctx, podList,
 		client.InNamespace(vtu.Spec.VaultPod.Namespace),
@@ -291,7 +295,8 @@ func (r *VaultReconciler) findVaultPods(ctx context.Context, vtu *vaultv1alpha1.
 	return podList.Items, nil
 }
 
-func (r *VaultReconciler) validateTransitToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) error {
+// ValidateTransitToken validates the transit token exists and is not empty
+func (r *VaultReconciler) ValidateTransitToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) error {
 	token, err := r.SecretManager.Get(ctx,
 		vtu.Spec.VaultPod.Namespace,
 		vtu.Spec.TransitVault.SecretRef.Name,
@@ -333,7 +338,8 @@ func (r *VaultReconciler) updateStatus(ctx context.Context, vtu *vaultv1alpha1.V
 	return r.Client.Status().Update(ctx, vtu)
 }
 
-func (r *VaultReconciler) unsealVault(ctx context.Context, vaultClient vault.Client, vtu *vaultv1alpha1.VaultTransitUnseal) error {
+// UnsealVault unseals a vault instance using transit unseal
+func (r *VaultReconciler) UnsealVault(ctx context.Context, vaultClient vault.Client, vtu *vaultv1alpha1.VaultTransitUnseal) error {
 	log := r.Log.WithName("unseal")
 
 	// Get transit token
@@ -345,9 +351,15 @@ func (r *VaultReconciler) unsealVault(ctx context.Context, vaultClient vault.Cli
 		return fmt.Errorf("getting transit token: %w", err)
 	}
 
+	// Resolve transit vault address
+	transitAddress, err := ResolveTransitVaultAddress(ctx, r.Client, log, vtu)
+	if err != nil {
+		return fmt.Errorf("resolving transit vault address: %w", err)
+	}
+
 	// Create transit client
 	transitClient, err := transit.NewClient(
-		vtu.Spec.TransitVault.Address,
+		transitAddress,
 		string(transitToken),
 		vtu.Spec.TransitVault.KeyName,
 		vtu.Spec.TransitVault.MountPath,
@@ -369,7 +381,8 @@ func (r *VaultReconciler) unsealVault(ctx context.Context, vaultClient vault.Cli
 	return nil
 }
 
-func (r *VaultReconciler) getAdminToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) ([]byte, error) {
+// GetAdminToken retrieves the admin token from secret storage
+func (r *VaultReconciler) GetAdminToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) ([]byte, error) {
 	// Try to get the admin token from the secret
 	token, err := r.SecretManager.Get(ctx,
 		vtu.Spec.VaultPod.Namespace,

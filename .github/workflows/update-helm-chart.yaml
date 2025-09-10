@@ -1,0 +1,152 @@
+name: Update Helm Chart
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to update (without v prefix)'
+        required: true
+        type: string
+      bump_chart_version:
+        description: 'Bump chart version'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  update-chart:
+    name: Update Helm Chart Version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "release" ]; then
+            # Remove 'v' prefix from release tag
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Checkout charts repository
+        uses: actions/checkout@v4
+        with:
+          repository: fredericrous/charts
+          token: ${{ secrets.CHARTS_REPO_TOKEN }}
+          path: charts
+
+      - name: Update Chart.yaml
+        id: update-chart
+        run: |
+          cd charts
+          CHART_PATH="charts/vault-transit-unseal-operator/Chart.yaml"
+          
+          # Update appVersion
+          yq -i ".appVersion = \"${{ steps.version.outputs.version }}\"" "$CHART_PATH"
+          
+          # Bump chart version if requested (default: true)
+          if [[ "${{ github.event.inputs.bump_chart_version }}" != "false" ]]; then
+            CURRENT_CHART_VERSION=$(yq '.version' "$CHART_PATH")
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_CHART_VERSION"
+            NEW_CHART_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+            yq -i ".version = \"$NEW_CHART_VERSION\"" "$CHART_PATH"
+            echo "chart_version=$NEW_CHART_VERSION" >> $GITHUB_OUTPUT
+          else
+            CHART_VERSION=$(yq '.version' "$CHART_PATH")
+            echo "chart_version=$CHART_VERSION" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Updated Chart.yaml:"
+          cat "$CHART_PATH"
+
+      - name: Create Pull Request
+        id: create-pr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.CHARTS_REPO_TOKEN }}
+          path: charts
+          commit-message: "chore: update vault-transit-unseal-operator to ${{ steps.version.outputs.version }}"
+          title: "chore: update vault-transit-unseal-operator to ${{ steps.version.outputs.version }}"
+          body: |
+            ## Automated Chart Update
+            
+            This PR updates the vault-transit-unseal-operator Helm chart:
+            - **appVersion**: `${{ steps.version.outputs.version }}`
+            - **Chart version**: `${{ steps.update-chart.outputs.chart_version }}`
+            
+            ### What's Changed
+            
+            This update includes the latest operator version with the following changes:
+            
+            ${{ github.event.release.body }}
+            
+            ### Checklist
+            
+            - [ ] Chart version bump is appropriate
+            - [ ] appVersion matches the operator release
+            - [ ] No breaking changes in default values
+            - [ ] Chart is ready for release
+            
+            ### Next Steps
+            
+            After merging this PR, create a new release tag:
+            ```bash
+            git tag vault-transit-unseal-operator-v${{ steps.update-chart.outputs.chart_version }}
+            git push origin vault-transit-unseal-operator-v${{ steps.update-chart.outputs.chart_version }}
+            ```
+            
+            ---
+            *This PR was automatically generated when [operator version ${{ steps.version.outputs.version }}](https://github.com/fredericrous/vault-transit-unseal-operator/releases/tag/v${{ steps.version.outputs.version }}) was released.*
+          branch: update-vault-transit-unseal-operator-${{ steps.version.outputs.version }}
+          base: main
+          labels: |
+            chart-update
+            automated
+            operator-release
+
+      - name: Add PR comment with testing instructions
+        if: steps.create-pr.outputs.pull-request-number
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.CHARTS_REPO_TOKEN }}
+          repository: fredericrous/charts
+          issue-number: ${{ steps.create-pr.outputs.pull-request-number }}
+          body: |
+            ### 🧪 Testing Instructions
+            
+            Test the updated chart locally:
+            ```bash
+            # Clone and checkout the PR branch
+            git clone https://github.com/fredericrous/charts.git
+            cd charts
+            git checkout update-vault-transit-unseal-operator-${{ steps.version.outputs.version }}
+            
+            # Test the chart
+            helm template vault-transit-unseal-operator ./charts/vault-transit-unseal-operator
+            helm lint ./charts/vault-transit-unseal-operator
+            
+            # Install test
+            helm install test-release ./charts/vault-transit-unseal-operator --dry-run --debug
+            ```
+
+      # Optional: Enable auto-merge if tests pass
+      # Requires branch protection rules with required status checks
+      - name: Enable auto-merge
+        if: steps.create-pr.outputs.pull-request-number && github.event_name == 'release'
+        continue-on-error: true
+        run: |
+          # Wait a bit for PR to be fully created
+          sleep 5
+          
+          # Enable auto-merge (requires repo settings to allow)
+          gh pr merge ${{ steps.create-pr.outputs.pull-request-number }} \
+            --repo fredericrous/charts \
+            --auto \
+            --squash
+        env:
+          GH_TOKEN: ${{ secrets.CHARTS_REPO_TOKEN }}

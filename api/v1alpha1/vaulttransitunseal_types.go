@@ -15,8 +15,13 @@ type VaultPodSpec struct {
 
 // TransitVaultSpec defines the transit Vault configuration
 type TransitVaultSpec struct {
-	// Transit Vault address
-	Address string `json:"address"`
+	// Transit Vault address (direct value)
+	// +optional
+	Address string `json:"address,omitempty"`
+
+	// Reference to get the address from ConfigMap or Secret
+	// +optional
+	AddressFrom *AddressReference `json:"addressFrom,omitempty"`
 
 	// Secret containing transit token
 	SecretRef SecretReference `json:"secretRef"`
@@ -42,6 +47,47 @@ type SecretReference struct {
 	// Key in the secret
 	// +kubebuilder:default=token
 	Key string `json:"key,omitempty"`
+}
+
+// AddressReference allows getting the address from ConfigMap or Secret
+type AddressReference struct {
+	// Reference to a key in a ConfigMap
+	// +optional
+	ConfigMapKeyRef *ConfigMapKeyReference `json:"configMapKeyRef,omitempty"`
+
+	// Reference to a key in a Secret
+	// +optional
+	SecretKeyRef *SecretKeyReference `json:"secretKeyRef,omitempty"`
+
+	// Default value to use if the reference cannot be resolved
+	// +optional
+	Default string `json:"default,omitempty"`
+}
+
+// ConfigMapKeyReference references a key in a ConfigMap
+type ConfigMapKeyReference struct {
+	// Name of the ConfigMap
+	Name string `json:"name"`
+
+	// Key in the ConfigMap
+	Key string `json:"key"`
+
+	// Namespace of the ConfigMap (defaults to the namespace of the VaultTransitUnseal)
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// SecretKeyReference references a key in a Secret
+type SecretKeyReference struct {
+	// Name of the Secret
+	Name string `json:"name"`
+
+	// Key in the Secret
+	Key string `json:"key"`
+
+	// Namespace of the Secret (defaults to the namespace of the VaultTransitUnseal)
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // InitializationSpec defines initialization parameters

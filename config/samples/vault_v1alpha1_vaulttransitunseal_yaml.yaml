@@ -1,0 +1,66 @@
+---
+# Example showing YAML path extraction from ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: vault
+data:
+  # Structured configuration
+  config.yaml: |
+    transit:
+      address: "http://192.168.1.42:61200"
+      mountPath: "transit"
+      keyName: "autounseal"
+      tlsSkipVerify: true
+---
+apiVersion: vault.homelab.io/v1alpha1
+kind: VaultTransitUnseal
+metadata:
+  name: vault-transit-unseal-yaml
+  namespace: vault
+spec:
+  vaultPod:
+    namespace: vault
+    selector:
+      app: vault
+  transitVault:
+    # Extract address from YAML structure in ConfigMap
+    addressFrom:
+      configMapKeyRef:
+        name: vault-config
+        # Use dot notation to extract nested values from YAML
+        key: config.yaml.transit.address
+      # Optional: provide a default if ConfigMap is missing
+      default: "http://192.168.1.42:61200"
+    secretRef:
+      name: k8s-transit-token
+      key: token
+    keyName: autounseal
+    mountPath: transit
+    tlsSkipVerify: true
+  initialization:
+    recoveryShares: 1
+    recoveryThreshold: 1
+    secretNames:
+      adminToken: vault-admin-token
+      recoveryKeys: vault-keys
+      storeRecoveryKeys: false
+  monitoring:
+    checkInterval: "30s"
+    retryInterval: "10s"
+  postUnsealConfig:
+    enableKV: true
+    enableExternalSecretsOperator: true
+    kvConfig:
+      path: "secret"
+      version: 2
+    externalSecretsOperatorConfig:
+      policyName: "external-secrets-operator"
+      kubernetesAuth:
+        roleName: "external-secrets-operator"
+        serviceAccounts:
+          - name: external-secrets
+            namespace: external-secrets
+        ttl: "24h"
+        maxTTL: "24h"

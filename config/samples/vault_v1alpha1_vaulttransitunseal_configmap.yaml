@@ -1,0 +1,65 @@
+---
+# Example showing how to use ConfigMap reference for QNAP Vault address
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: vault
+data:
+  qnap.address: "http://192.168.1.42:61200"
+  qnap.mount.path: "transit"
+  qnap.key.name: "autounseal"
+---
+apiVersion: vault.homelab.io/v1alpha1
+kind: VaultTransitUnseal
+metadata:
+  name: vault-transit-unseal-configmap
+  namespace: vault
+spec:
+  vaultPod:
+    namespace: vault
+    selector:
+      app: vault
+  transitVault:
+    # Address is now loaded from ConfigMap
+    addressFrom:
+      configMapKeyRef:
+        name: vault-config
+        key: qnap.address
+    secretRef:
+      name: k8s-transit-token
+      key: token
+    keyName: autounseal
+    mountPath: transit
+    tlsSkipVerify: true
+  initialization:
+    recoveryShares: 1
+    recoveryThreshold: 1
+    secretNames:
+      adminToken: vault-admin-token
+      recoveryKeys: vault-keys
+      # For production, set to false and handle recovery keys outside Kubernetes
+      storeRecoveryKeys: false
+      adminTokenAnnotations:
+        replicator.v1.mittwald.de/replicate-to-matching: >-
+          metadata.annotations.replicator\.v1\.mittwald\.de/replicated-from-version == "2"
+  monitoring:
+    checkInterval: "30s"
+    retryInterval: "10s"
+  postUnsealConfig:
+    enableKV: true
+    enableExternalSecretsOperator: true
+    kvConfig:
+      path: "secret"
+      version: 2
+      maxVersions: 5
+      deleteVersionAfter: "30d"
+    externalSecretsOperatorConfig:
+      policyName: "external-secrets-operator"
+      kubernetesAuth:
+        roleName: "external-secrets-operator"
+        serviceAccounts:
+          - name: external-secrets
+            namespace: external-secrets
+        ttl: "24h"
+        maxTTL: "24h"

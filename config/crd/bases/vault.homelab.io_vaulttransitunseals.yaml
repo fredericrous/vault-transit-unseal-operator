@@ -197,8 +197,50 @@ spec:
                 description: Transit Vault configuration
                 properties:
                   address:
-                    description: Transit Vault address
+                    description: Transit Vault address (direct value)
                     type: string
+                  addressFrom:
+                    description: Reference to get the address from ConfigMap or Secret
+                    properties:
+                      configMapKeyRef:
+                        description: Reference to a key in a ConfigMap
+                        properties:
+                          key:
+                            description: Key in the ConfigMap
+                            type: string
+                          name:
+                            description: Name of the ConfigMap
+                            type: string
+                          namespace:
+                            description: Namespace of the ConfigMap (defaults to the
+                              namespace of the VaultTransitUnseal)
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      default:
+                        description: Default value to use if the reference cannot
+                          be resolved
+                        type: string
+                      secretKeyRef:
+                        description: Reference to a key in a Secret
+                        properties:
+                          key:
+                            description: Key in the Secret
+                            type: string
+                          name:
+                            description: Name of the Secret
+                            type: string
+                          namespace:
+                            description: Namespace of the Secret (defaults to the
+                              namespace of the VaultTransitUnseal)
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                    type: object
                   keyName:
                     default: autounseal
                     description: Transit key name
@@ -225,7 +267,6 @@ spec:
                     description: Skip TLS verification
                     type: boolean
                 required:
-                - address
                 - secretRef
                 type: object
               vaultPod:

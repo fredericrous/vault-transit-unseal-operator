@@ -5,6 +5,7 @@ echo "Running tests with coverage for business logic packages..."
 echo
 
 # Run tests for business logic packages only (continue on failure)
+# Use -tags to exclude test helpers
 go test \
   ./pkg/reconciler \
   ./pkg/vault \
@@ -12,11 +13,12 @@ go test \
   ./pkg/errors \
   ./pkg/health \
   ./pkg/metrics \
-  -coverprofile=business-cover.out || true
+  -coverprofile=business-cover.out \
+  -coverpkg=./pkg/reconciler,./pkg/vault,./pkg/transit,./pkg/errors,./pkg/health,./pkg/metrics || true
 
 # Display coverage for business logic only
 echo -e "\n=== Business Logic Coverage ==="
-go tool cover -func=business-cover.out | grep -E "(reconciler|vault|transit|errors|health|metrics)" | grep -v test_helpers
+go tool cover -func=business-cover.out | grep -E "(reconciler|vault|transit|errors|health|metrics)" | grep -v -E "(test_helpers|testhelpers)"
 
 # Show total coverage for business logic
 echo -e "\n=== Total Business Logic Coverage ==="

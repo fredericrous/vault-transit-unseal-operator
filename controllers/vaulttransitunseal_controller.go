@@ -14,10 +14,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/config"
@@ -86,6 +90,21 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vaultv1alpha1.VaultTransitUnseal{}).
+		Owns(&corev1.Secret{}).
+		Watches(
+			&corev1.ConfigMap{},
+			r.enqueueRequestsForConfigMap(),
+			builder.WithPredicates(
+				predicate.ResourceVersionChangedPredicate{},
+			),
+		).
+		Watches(
+			&corev1.Secret{},
+			r.enqueueRequestsForSecret(),
+			builder.WithPredicates(
+				predicate.ResourceVersionChangedPredicate{},
+			),
+		).
 		WithOptions(opts).
 		Complete(r)
 }
@@ -269,4 +288,115 @@ func RegisterHealthChecks(mgr manager.Manager, checker *health.Checker) error {
 	}
 
 	return nil
+}
+
+// enqueueRequestsForConfigMap returns a handler that enqueues VaultTransitUnseal objects
+// that reference the given ConfigMap in their addressFrom field
+func (r *VaultTransitUnsealReconciler) enqueueRequestsForConfigMap() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		cm, ok := obj.(*corev1.ConfigMap)
+		if !ok {
+			return nil
+		}
+
+		// List all VaultTransitUnseal resources
+		vtuList := &vaultv1alpha1.VaultTransitUnsealList{}
+		if err := r.List(ctx, vtuList); err != nil {
+			r.Log.Error(err, "Failed to list VaultTransitUnseal resources")
+			return nil
+		}
+
+		var requests []reconcile.Request
+		for _, vtu := range vtuList.Items {
+			// Check if this VTU references the ConfigMap
+			if vtu.Spec.TransitVault.AddressFrom != nil &&
+				vtu.Spec.TransitVault.AddressFrom.ConfigMapKeyRef != nil {
+
+				ref := vtu.Spec.TransitVault.AddressFrom.ConfigMapKeyRef
+				namespace := ref.Namespace
+				if namespace == "" {
+					namespace = vtu.Namespace
+				}
+
+				// If the ConfigMap matches, enqueue the VTU
+				if cm.Name == ref.Name && cm.Namespace == namespace {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name:      vtu.Name,
+							Namespace: vtu.Namespace,
+						},
+					})
+				}
+			}
+		}
+
+		if len(requests) > 0 {
+			r.Log.V(1).Info("Enqueuing VaultTransitUnseal resources due to ConfigMap change",
+				"configMap", types.NamespacedName{Name: cm.Name, Namespace: cm.Namespace},
+				"count", len(requests))
+		}
+
+		return requests
+	})
+}
+
+// enqueueRequestsForSecret returns a handler that enqueues VaultTransitUnseal objects
+// that reference the given Secret in their addressFrom field
+func (r *VaultTransitUnsealReconciler) enqueueRequestsForSecret() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		secret, ok := obj.(*corev1.Secret)
+		if !ok {
+			return nil
+		}
+
+		// List all VaultTransitUnseal resources
+		vtuList := &vaultv1alpha1.VaultTransitUnsealList{}
+		if err := r.List(ctx, vtuList); err != nil {
+			r.Log.Error(err, "Failed to list VaultTransitUnseal resources")
+			return nil
+		}
+
+		var requests []reconcile.Request
+		for _, vtu := range vtuList.Items {
+			// Check if this VTU references the Secret for address
+			if vtu.Spec.TransitVault.AddressFrom != nil &&
+				vtu.Spec.TransitVault.AddressFrom.SecretKeyRef != nil {
+
+				ref := vtu.Spec.TransitVault.AddressFrom.SecretKeyRef
+				namespace := ref.Namespace
+				if namespace == "" {
+					namespace = vtu.Namespace
+				}
+
+				// If the Secret matches, enqueue the VTU
+				if secret.Name == ref.Name && secret.Namespace == namespace {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name:      vtu.Name,
+							Namespace: vtu.Namespace,
+						},
+					})
+				}
+			}
+
+			// Also check transit token secret references
+			if secret.Name == vtu.Spec.TransitVault.SecretRef.Name &&
+				secret.Namespace == vtu.Spec.VaultPod.Namespace {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      vtu.Name,
+						Namespace: vtu.Namespace,
+					},
+				})
+			}
+		}
+
+		if len(requests) > 0 {
+			r.Log.V(1).Info("Enqueuing VaultTransitUnseal resources due to Secret change",
+				"secret", types.NamespacedName{Name: secret.Name, Namespace: secret.Namespace},
+				"count", len(requests))
+		}
+
+		return requests
+	})
 }
