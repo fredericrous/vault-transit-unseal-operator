@@ -70,64 +70,38 @@ jobs:
           echo "Updated Chart.yaml:"
           cat "$CHART_PATH"
 
-      - name: Update README.md
+      - name: Update README.md Chart Table
         run: |
           cd charts
+          README_FILE="README.md"
           CHART_NAME="vault-transit-unseal-operator"
-          README_PATH="charts/${CHART_NAME}/README.md"
+          CHART_VERSION="${{ steps.update-chart.outputs.chart_version }}"
+          APP_VERSION="${{ steps.version.outputs.version }}"
           
-          # Update version references in README
-          if [ -f "$README_PATH" ]; then
-            # Create a temporary file for safe editing
-            cp "$README_PATH" "$README_PATH.tmp"
+          if [ -f "$README_FILE" ]; then
+            # Update the chart table entry
+            # Format: | [chart-name](path/) | chart-version | app-version | description |
             
-            # Process the file line by line to maintain context
-            awk -v chart="$CHART_NAME" -v version="${{ steps.version.outputs.version }}" '
-            BEGIN { in_chart_section = 0 }
+            # Use awk to update the specific chart's row in the table
+            awk -v chart="$CHART_NAME" -v chartVer="$CHART_VERSION" -v appVer="$APP_VERSION" '
+              BEGIN { FS = "|"; OFS = "|" }
+              /\['"$CHART_NAME"'\]/ {
+                # Update chart version (field 3) and app version (field 4)
+                gsub(/[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*/, " " chartVer " ", $3)
+                gsub(/[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*/, " " appVer " ", $4)
+              }
+              { print }
+            ' "$README_FILE" > "$README_FILE.tmp" && mv "$README_FILE.tmp" "$README_FILE"
             
-            # Detect if we are in a section about this specific chart
-            tolower($0) ~ tolower(chart) { in_chart_section = 1 }
-            
-            # Reset section detection on headers or empty lines followed by headers
-            /^#{1,3} / && tolower($0) !~ tolower(chart) { in_chart_section = 0 }
-            
-            # Update tag only if we are in the correct chart section
-            in_chart_section && /tag:/ && !/kube-rbac-proxy/ {
-              # Update versioned tags
-              gsub(/tag: "?v[0-9]+\.[0-9]+\.[0-9]+"?/, "tag: \"v" version "\"")
-            }
-            
-            # Always print the line
-            { print }
-            ' "$README_PATH.tmp" > "$README_PATH"
-            
-            rm -f "$README_PATH.tmp"
-            
-            echo "Updated README.md - changed ${CHART_NAME} image tag references to v${{ steps.version.outputs.version }}"
-            
-            # Show what was changed
-            echo "=== Changes made ==="
-            grep -n "tag:" "$README_PATH" | grep -B5 -A5 "$CHART_NAME" | grep "tag:" || echo "No tag references found in ${CHART_NAME} sections"
-          else
-            echo "README.md not found at $README_PATH"
-          fi
-
-      - name: Update Root README.md
-        run: |
-          cd charts
-          ROOT_README="README.md"
-          CHART_NAME="vault-transit-unseal-operator"
-          
-          if [ -f "$ROOT_README" ]; then
-            # Update the chart table entry for app version
-            # This matches lines like: | [vault-transit-unseal-operator](charts/vault-transit-unseal-operator/) | 0.1.0 | 0.1.0 | Description |
-            sed -i "/\[${CHART_NAME}\]/ s/| [0-9]\+\.[0-9]\+\.[0-9]\+ |/| ${{ steps.version.outputs.version }} |/2" "$ROOT_README"
-            
-            echo "Updated root README.md - changed ${CHART_NAME} app version to ${{ steps.version.outputs.version }}"
+            echo "Updated README.md chart table:"
+            echo "- Chart version: $CHART_VERSION"
+            echo "- App version: $APP_VERSION"
             
             # Show the updated line
-            echo "=== Updated chart table entry ==="
-            grep -n "\[${CHART_NAME}\]" "$ROOT_README" || echo "Chart not found in root README.md"
+            echo -e "\n=== Updated chart table entry ==="
+            grep -n "\[${CHART_NAME}\]" "$README_FILE" || echo "Chart not found in README.md"
+          else
+            echo "README.md not found"
           fi
 
       - name: Create Pull Request
@@ -147,8 +121,7 @@ jobs:
             
             ### Files Updated
             - `charts/vault-transit-unseal-operator/Chart.yaml` - Updated appVersion and chart version
-            - `charts/vault-transit-unseal-operator/README.md` - Updated image tag examples
-            - `README.md` - Updated app version in charts table
+            - `README.md` - Updated chart version and app version in charts table
             
             ### What's Changed
             
