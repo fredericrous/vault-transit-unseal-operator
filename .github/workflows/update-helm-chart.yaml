@@ -3,6 +3,8 @@ name: Update Helm Chart
 on:
   release:
     types: [published]
+  repository_dispatch:
+    types: [helm-chart-update]
   workflow_dispatch:
     inputs:
       version:
@@ -26,6 +28,10 @@ jobs:
           if [ "${{ github.event_name }}" == "release" ]; then
             # Remove 'v' prefix from release tag
             VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+          elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            # Get version from repository_dispatch payload
+            VERSION="${{ github.event.client_payload.version }}"
             VERSION="${VERSION#v}"
           else
             VERSION="${{ github.event.inputs.version }}"
@@ -64,6 +70,29 @@ jobs:
           echo "Updated Chart.yaml:"
           cat "$CHART_PATH"
 
+      - name: Update README.md
+        run: |
+          cd charts
+          README_PATH="charts/vault-transit-unseal-operator/README.md"
+          
+          # Update version references in README
+          if [ -f "$README_PATH" ]; then
+            # Update image tag in the example values.yaml section
+            # This matches lines like:   tag: "v0.3.0"
+            sed -i 's/tag: "v[0-9]\+\.[0-9]\+\.[0-9]\+"/tag: "v${{ steps.version.outputs.version }}"/' "$README_PATH"
+            
+            # Also update without quotes if present
+            sed -i 's/tag: v[0-9]\+\.[0-9]\+\.[0-9]\+/tag: v${{ steps.version.outputs.version }}/' "$README_PATH"
+            
+            echo "Updated README.md - changed image tag references to v${{ steps.version.outputs.version }}"
+            
+            # Show what was changed
+            echo "=== Changes made ==="
+            grep -n "tag:" "$README_PATH" | grep -v "kube-rbac-proxy" || true
+          else
+            echo "README.md not found at $README_PATH"
+          fi
+
       - name: Create Pull Request
         id: create-pr
         uses: peter-evans/create-pull-request@v6
@@ -78,6 +107,7 @@ jobs:
             This PR updates the vault-transit-unseal-operator Helm chart:
             - **appVersion**: `${{ steps.version.outputs.version }}`
             - **Chart version**: `${{ steps.update-chart.outputs.chart_version }}`
+            - **README.md**: Updated version references and examples
             
             ### What's Changed
             
