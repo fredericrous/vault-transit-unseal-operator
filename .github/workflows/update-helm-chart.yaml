@@ -136,40 +136,12 @@ jobs:
             # Check if chart exists in the table
             if grep -q "\[${CHART_NAME}\]" "$README_FILE"; then
               echo "Updating existing chart entry in README.md"
-              # Use awk to update ONLY the specific chart's row
-              awk -v chart="$CHART_NAME" -v chartVer="$CHART_VERSION" -v appVer="$APP_VERSION" '
-                BEGIN { FS = "|"; OFS = "|" }
-                {
-                  if (index($0, "[" chart "]") > 0) {
-                    # This is our chart row - update versions in fields 3 and 4
-                    gsub(/[0-9]+\.[0-9]+\.[0-9]+/, chartVer, $3)
-                    gsub(/[0-9]+\.[0-9]+\.[0-9]+/, appVer, $4)
-                  }
-                  print
-                }
-              ' "$README_FILE" > "$README_FILE.tmp" && mv "$README_FILE.tmp" "$README_FILE"
+              # Use sed to update the chart entry
+              sed -i "s|\[${CHART_NAME}\].*|\[${CHART_NAME}\](charts/${CHART_NAME}/) | ${CHART_VERSION} | ${APP_VERSION} | A Kubernetes operator that automatically manages HashiCorp Vault initialization and unsealing using transit unseal |" "$README_FILE"
             else
               echo "Chart not found in README.md - adding new entry"
-              # Find the table and add the new chart entry
-              # This handles the case where the chart is new
-              awk -v chart="$CHART_NAME" -v chartVer="$CHART_VERSION" -v appVer="$APP_VERSION" '
-                BEGIN { 
-                  FS = "|"; OFS = "|"
-                  added = 0
-                }
-                {
-                  print
-                  # If we find the header row and haven't added yet
-                  if ($0 ~ /\| Chart.*\| Version.*\| App Version.*\| Description/ && !added) {
-                    # Print the separator line first
-                    getline
-                    print
-                    # Add our new chart entry
-                    print "| [" chart "](charts/" chart "/) | " chartVer " | " appVer " | A Kubernetes operator that automatically manages HashiCorp Vault initialization and unsealing using transit unseal |"
-                    added = 1
-                  }
-                }
-              ' "$README_FILE" > "$README_FILE.tmp" && mv "$README_FILE.tmp" "$README_FILE"
+              # Add the chart entry after the table header
+              sed -i "/^|-------|/a | [${CHART_NAME}](charts/${CHART_NAME}/) | ${CHART_VERSION} | ${APP_VERSION} | A Kubernetes operator that automatically manages HashiCorp Vault initialization and unsealing using transit unseal |" "$README_FILE"
             fi
             
             echo "Updated README.md chart table:"
