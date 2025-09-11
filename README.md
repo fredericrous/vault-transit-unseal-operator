@@ -2,6 +2,8 @@
 
 A Kubernetes operator that automatically manages HashiCorp Vault initialization and unsealing using transit unseal. This operator watches for uninitialized or sealed Vault instances in your cluster and handles the initialization and unsealing process automatically, storing the resulting tokens and keys securely in Kubernetes secrets.
 
+> **⚠️ Breaking Change in v1.0.0**: The operator now uses command-line flags instead of environment variables for configuration. If you're upgrading from a previous version, please see the [migration guide](#migrating-from-v0x-to-v10) below.
+
 ## Features
 
 - **Automatic Vault Initialization**: Detects uninitialized Vault pods and initializes them with transit unseal
@@ -88,6 +90,72 @@ kubectl create secret generic vault-transit-token \
            # Works with Reloader to restart pods when secrets change
            reloader.stakater.com/match: "true"
    ```
+
+## Command-Line Flags
+
+The operator supports the following command-line flags for configuration:
+
+```bash
+  -health-probe-bind-address string
+        The address the probe endpoint binds to (default ":8081")
+  -kubeconfig string
+        Paths to a kubeconfig. Only required if out-of-cluster.
+  -leader-elect
+        Enable leader election for controller manager
+  -leader-election-id string
+        Leader election ID (default "vault-transit-unseal-operator")
+  -max-concurrent-reconciles int
+        Maximum number of concurrent reconciles (default 3)
+  -metrics-bind-address string
+        The address the metric endpoint binds to (default ":8080")
+  -metrics-enabled
+        Enable metrics endpoint (default true)
+  -namespace string
+        Namespace to watch for Vault pods (default "vault")
+  -reconcile-timeout duration
+        Timeout for each reconcile operation (default 5m0s)
+  -skip-crd-install
+        Skip CRD installation
+  -vault-timeout duration
+        Timeout for Vault API operations (default 30s)
+  -vault-tls-validation
+        Enable TLS certificate validation for Vault (default true)
+  -zap-devel
+        Enable development mode logging
+  -zap-encoder string
+        Zap log encoding (json or console) (default "json")
+  -zap-log-level string
+        Zap log level (debug, info, warn, error) (default "info")
+  -zap-stacktrace-level string
+        Zap level at which to log stack traces (default "error")
+  -zap-time-encoding string
+        Zap time encoding (default "iso8601")
+```
+
+### Using Flags with Helm
+
+When deploying with Helm, you can configure these flags through values.yaml:
+
+```yaml
+# Namespace to watch for Vault pods (empty string means all namespaces)
+watchNamespace: ""
+
+# Operator features
+skipCrdInstall: false
+enableLeaderElection: false
+
+# Operator configuration
+maxConcurrentReconciles: 3
+reconcileTimeout: 5m
+vaultTimeout: 30s
+vaultTlsValidation: true
+
+# Additional args can be added to controllerManager.manager.args
+controllerManager:
+  manager:
+    args:
+    - --zap-log-level=debug
+```
 
 ## Configuration Options
 
@@ -605,3 +673,71 @@ spec:
 ## License
 
 MIT
+
+
+## Migrating from v0.x to v1.0
+
+Version 1.0.0 introduces a breaking change: the operator now uses command-line flags instead of environment variables for configuration.
+
+### What Changed
+
+- **Environment variables removed**: All configuration via environment variables has been removed
+- **Command-line flags added**: Configuration is now done via command-line flags
+- **Helm chart updated**: The Helm chart has been updated to use the new flags
+
+### Migration Steps
+
+1. **Update your Helm values**:
+   
+   If you were using environment variables:
+   ```yaml
+   # Old (v0.x)
+   extraEnvVars:
+   - name: METRICS_ADDR
+     value: ":9090"
+   - name: NAMESPACE
+     value: "my-vault"
+   - name: ENABLE_LEADER_ELECTION
+     value: "true"
+   ```
+   
+   Change to:
+   ```yaml
+   # New (v1.0)
+   watchNamespace: "my-vault"
+   enableLeaderElection: true
+   controllerManager:
+     manager:
+       args:
+       - --metrics-bind-address=:9090
+   ```
+
+2. **Update any custom deployments**:
+   
+   If you're deploying without Helm:
+   ```yaml
+   # Old (v0.x)
+   env:
+   - name: NAMESPACE
+     value: "my-vault"
+   - name: ENABLE_METRICS
+     value: "true"
+   ```
+   
+   Change to:
+   ```yaml
+   # New (v1.0)
+   args:
+   - --namespace=my-vault
+   - --metrics-enabled
+   ```
+
+3. **Review new configuration options**: Check the [Command-Line Flags](#command-line-flags) section for all available options.
+
+### Environment Variables Still Supported
+
+The following environment variables are still supported as they are not configuration parameters:
+- `ARGOCD_MANAGED`: Set to "true" to indicate ArgoCD management
+- `POD_NAMESPACE`: Injected via downward API for pod information
+- `POD_NAME`: Injected via downward API for pod information
+EOF < /dev/null

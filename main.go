@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"go.uber.org/zap/zapcore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,42 +38,146 @@ func init() {
 }
 
 func main() {
-	// Parse flags (these can override environment variables)
-	var configFile string
-	flag.StringVar(&configFile, "config", "", "Path to configuration file")
+	// Define all configuration flags
+	var (
+		// Core settings
+		metricsAddr      = flag.String("metrics-bind-address", ":8080", "The address the metric endpoint binds to")
+		probeAddr        = flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to")
+		enableLeaderElection = flag.Bool("leader-elect", false, "Enable leader election for controller manager")
+		leaderElectionID = flag.String("leader-election-id", "vault-transit-unseal-operator", "Leader election ID")
+		
+		// Operational settings
+		namespace               = flag.String("namespace", "vault", "Namespace to watch for Vault pods")
+		maxConcurrentReconciles = flag.Int("max-concurrent-reconciles", 3, "Maximum number of concurrent reconciles")
+		reconcileTimeout        = flag.Duration("reconcile-timeout", 5*time.Minute, "Timeout for each reconcile operation")
+		
+		// Feature flags
+		enableMetrics  = flag.Bool("metrics-enabled", true, "Enable metrics endpoint")
+		skipCRDInstall = flag.Bool("skip-crd-install", false, "Skip CRD installation")
+		
+		// Vault settings
+		vaultTimeout        = flag.Duration("vault-timeout", 30*time.Second, "Timeout for Vault API operations")
+		enableTLSValidation = flag.Bool("vault-tls-validation", true, "Enable TLS certificate validation for Vault")
+		
+		// Logging
+		logLevel = flag.String("zap-log-level", "info", "Zap log level (debug, info, warn, error)")
+		logDevel = flag.Bool("zap-devel", false, "Enable development mode logging")
+		logEncoder = flag.String("zap-encoder", "json", "Zap log encoding (json or console)")
+		logTimeEncoding = flag.String("zap-time-encoding", "iso8601", "Zap time encoding")
+		logStacktraceLevel = flag.String("zap-stacktrace-level", "error", "Zap level at which to log stack traces")
+	)
+	
 	flag.Parse()
 
-	// Setup logging with production settings
+	// Setup logging based on flags
 	opts := zap.Options{
-		Development: false,
-		Level:       zapcore.InfoLevel,
-		Encoder: zapcore.NewJSONEncoder(zapcore.EncoderConfig{
+		Development: *logDevel,
+		TimeEncoder: func() zapcore.TimeEncoder {
+			switch *logTimeEncoding {
+			case "epoch":
+				return zapcore.EpochTimeEncoder
+			case "epoch-millis":
+				return zapcore.EpochMillisTimeEncoder
+			case "epoch-nanos":
+				return zapcore.EpochNanosTimeEncoder
+			case "rfc3339":
+				return zapcore.RFC3339TimeEncoder
+			case "rfc3339nano":
+				return zapcore.RFC3339NanoTimeEncoder
+			default:
+				return zapcore.ISO8601TimeEncoder
+			}
+		}(),
+	}
+	
+	// Set log level
+	switch *logLevel {
+	case "debug":
+		opts.Level = zapcore.DebugLevel
+	case "info":
+		opts.Level = zapcore.InfoLevel
+	case "warn":
+		opts.Level = zapcore.WarnLevel
+	case "error":
+		opts.Level = zapcore.ErrorLevel
+	default:
+		opts.Level = zapcore.InfoLevel
+	}
+	
+	// Set stacktrace level
+	switch *logStacktraceLevel {
+	case "debug":
+		opts.StacktraceLevel = zapcore.DebugLevel
+	case "info":
+		opts.StacktraceLevel = zapcore.InfoLevel
+	case "warn":
+		opts.StacktraceLevel = zapcore.WarnLevel
+	case "error":
+		opts.StacktraceLevel = zapcore.ErrorLevel
+	default:
+		opts.StacktraceLevel = zapcore.ErrorLevel
+	}
+	
+	// Set encoder
+	if *logEncoder == "console" {
+		opts.Encoder = zapcore.NewConsoleEncoder(zapcore.EncoderConfig{
+			TimeKey:        "ts",
+			LevelKey:       "level",
+			NameKey:        "logger",
+			CallerKey:      "caller",
+			FunctionKey:    zapcore.OmitKey,
+			MessageKey:     "msg",
+			StacktraceKey:  "stacktrace",
+			LineEnding:     zapcore.DefaultLineEnding,
+			EncodeLevel:    zapcore.CapitalLevelEncoder,
+			EncodeTime:     opts.TimeEncoder,
+			EncodeDuration: zapcore.StringDurationEncoder,
+			EncodeCaller:   zapcore.ShortCallerEncoder,
+		})
+	} else {
+		opts.Encoder = zapcore.NewJSONEncoder(zapcore.EncoderConfig{
 			TimeKey:        "timestamp",
 			LevelKey:       "level",
 			NameKey:        "logger",
 			CallerKey:      "caller",
+			FunctionKey:    zapcore.OmitKey,
 			MessageKey:     "msg",
 			StacktraceKey:  "stacktrace",
 			LineEnding:     zapcore.DefaultLineEnding,
 			EncodeLevel:    zapcore.LowercaseLevelEncoder,
-			EncodeTime:     zapcore.ISO8601TimeEncoder,
+			EncodeTime:     opts.TimeEncoder,
 			EncodeDuration: zapcore.SecondsDurationEncoder,
 			EncodeCaller:   zapcore.ShortCallerEncoder,
-		}),
-	}
-
-	// Allow debug mode via environment
-	if os.Getenv("DEBUG") == "true" {
-		opts.Development = true
-		opts.Level = zapcore.DebugLevel
+		})
 	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// Load configuration
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		setupLog.Error(err, "Failed to load configuration")
+	// Create configuration from flags
+	cfg := &config.OperatorConfig{
+		// Feature flags
+		EnableMetrics:        *enableMetrics,
+		EnableLeaderElection: *enableLeaderElection,
+		SkipCRDInstall:       *skipCRDInstall,
+		
+		// Operational settings
+		ReconcileTimeout:        *reconcileTimeout,
+		MaxConcurrentReconciles: *maxConcurrentReconciles,
+		Namespace:               *namespace,
+		
+		// Vault settings
+		DefaultVaultTimeout: *vaultTimeout,
+		EnableTLSValidation: *enableTLSValidation,
+		
+		// Server settings
+		MetricsAddr:      *metricsAddr,
+		ProbeAddr:        *probeAddr,
+		LeaderElectionID: *leaderElectionID,
+	}
+	
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		setupLog.Error(err, "Invalid configuration")
 		os.Exit(1)
 	}
 
@@ -84,16 +189,13 @@ func main() {
 		"maxConcurrentReconciles", cfg.MaxConcurrentReconciles,
 	)
 
-	// Install/Update CRDs if not skipped
-	skipCRDInstall := cfg.SkipCRDInstall
-
 	// Check if we should skip CRD install based on environment detection
-	if !skipCRDInstall && isRunningInArgoCD() {
+	if !cfg.SkipCRDInstall && isRunningInArgoCD() {
 		setupLog.Info("Detected ArgoCD environment, skipping CRD installation")
-		skipCRDInstall = true
+		cfg.SkipCRDInstall = true
 	}
 
-	if !skipCRDInstall {
+	if !cfg.SkipCRDInstall {
 		setupLog.Info("Installing CRDs")
 		restConfig := ctrl.GetConfigOrDie()
 		if err := crd.InstallCRDs(context.Background(), restConfig); err != nil {
@@ -171,8 +273,8 @@ func setupController(mgr manager.Manager, cfg *config.OperatorConfig, recorder r
 func isRunningInArgoCD() bool {
 	ctx := context.Background()
 
-	// First, check environment variables that ArgoCD might set
-	// These are not standard but could be set by users
+	// Check environment variable that users can set to indicate ArgoCD management
+	// This allows explicit control when auto-detection might not work
 	if os.Getenv("ARGOCD_MANAGED") == "true" {
 		return true
 	}
