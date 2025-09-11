@@ -133,7 +133,6 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
           generate_release_notes: true
-          token: ${{ secrets.CHARTS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
 
 
   security-scan:

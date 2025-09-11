@@ -1,15 +1,36 @@
 name: Post Release Tasks
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
 
 jobs:
   trigger-chart-update:
     name: Trigger Chart Update
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
+      - name: Get Release Info
+        id: release_info
+        run: |
+          # Get the tag from the workflow run
+          TAG_NAME="${{ github.event.workflow_run.head_branch }}"
+          
+          # Check if it's a tag (starts with refs/tags/)
+          if [[ "$TAG_NAME" =~ ^refs/tags/ ]]; then
+            TAG_NAME="${TAG_NAME#refs/tags/}"
+          else
+            echo "::error::Not a tag push, skipping"
+            exit 0
+          fi
+          
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Processing release for tag: $TAG_NAME"
+      
       - name: Check for required secrets
+        if: steps.release_info.outputs.tag_name != ''
         run: |
           if [ -z "${{ secrets.CHARTS_REPO_TOKEN }}" ]; then
             echo "::error::CHARTS_REPO_TOKEN secret is not set. Please add it to repository secrets."
@@ -18,9 +39,10 @@ jobs:
           echo "CHARTS_REPO_TOKEN is configured ✓"
       
       - name: Trigger Helm Chart Update Workflow
+        if: steps.release_info.outputs.tag_name != ''
         run: |
           # Extract version from release tag
-          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${{ steps.release_info.outputs.tag_name }}"
           
           echo "Triggering Helm chart update for version ${VERSION}"
           
