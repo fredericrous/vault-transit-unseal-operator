@@ -1,5 +1,8 @@
+# Version from VERSION file
+VERSION ?= $(shell cat VERSION)
+
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/fredericrous/vault-transit-unseal-operator:latest
+IMG ?= ghcr.io/fredericrous/vault-transit-unseal-operator:$(VERSION)
 # Kubernetes version for code generation
 KUBE_VERSION ?= 1.29.0
 # Get the currently used golang version
@@ -65,9 +68,11 @@ run: manifests generate fmt vet ## Run a controller from your host.
 
 docker-build: ## Build docker image with the manager.
 	docker build -t ${IMG} .
+	docker tag ${IMG} ghcr.io/fredericrous/vault-transit-unseal-operator:latest
 
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+	docker push ghcr.io/fredericrous/vault-transit-unseal-operator:latest
 
 ##@ Deployment
 
