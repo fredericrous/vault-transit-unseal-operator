@@ -57,14 +57,20 @@ jobs:
           cd charts
           CHART_PATH="charts/vault-transit-unseal-operator/Chart.yaml"
           
+          # Get current versions BEFORE making changes
+          CURRENT_CHART_VERSION=$(yq '.version' "$CHART_PATH")
+          CURRENT_APP_VERSION=$(yq '.appVersion' "$CHART_PATH")
+          NEW_APP_VERSION="${{ steps.version.outputs.version }}"
+          
+          echo "Current state:"
+          echo "- Chart version: $CURRENT_CHART_VERSION"
+          echo "- App version: $CURRENT_APP_VERSION → $NEW_APP_VERSION"
+          
           # Update appVersion
-          yq -i ".appVersion = \"${{ steps.version.outputs.version }}\"" "$CHART_PATH"
+          yq -i ".appVersion = \"$NEW_APP_VERSION\"" "$CHART_PATH"
           
           # Bump chart version if requested (default: true)
           if [[ "${{ github.event.inputs.bump_chart_version }}" != "false" ]]; then
-            CURRENT_CHART_VERSION=$(yq '.version' "$CHART_PATH")
-            CURRENT_APP_VERSION=$(yq '.appVersion' "$CHART_PATH")
-            NEW_APP_VERSION="${{ steps.version.outputs.version }}"
             
             # Parse versions
             IFS='.' read -r CHART_MAJOR CHART_MINOR CHART_PATCH <<< "$CURRENT_CHART_VERSION"
@@ -127,16 +133,46 @@ jobs:
             # Update the chart table entry
             # Format: | [chart-name](path/) | chart-version | app-version | description |
             
-            # Use awk to update the specific chart's row in the table
-            awk -v chart="$CHART_NAME" -v chartVer="$CHART_VERSION" -v appVer="$APP_VERSION" '
-              BEGIN { FS = "|"; OFS = "|" }
-              /\['"$CHART_NAME"'\]/ {
-                # Update chart version (field 3) and app version (field 4)
-                gsub(/[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*/, " " chartVer " ", $3)
-                gsub(/[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*/, " " appVer " ", $4)
-              }
-              { print }
-            ' "$README_FILE" > "$README_FILE.tmp" && mv "$README_FILE.tmp" "$README_FILE"
+            # Check if chart exists in the table
+            if grep -q "\[${CHART_NAME}\]" "$README_FILE"; then
+              echo "Updating existing chart entry in README.md"
+              # Use awk to update ONLY the specific chart's row
+              awk -v chart="$CHART_NAME" -v chartVer="$CHART_VERSION" -v appVer="$APP_VERSION" '
+                BEGIN { FS = "|"; OFS = "|" }
+                {
+                  if ($0 ~ /\['"$CHART_NAME"'\]/) {
+                    # This is our chart's row - update it
+                    # Preserve the link in field 2, update versions in fields 3 and 4
+                    # Keep all spacing and formatting
+                    gsub(/[0-9]+\.[0-9]+\.[0-9]+/, chartVer, $3)
+                    gsub(/[0-9]+\.[0-9]+\.[0-9]+/, appVer, $4)
+                  }
+                  print
+                }
+              ' "$README_FILE" > "$README_FILE.tmp" && mv "$README_FILE.tmp" "$README_FILE"
+            else
+              echo "Chart not found in README.md - adding new entry"
+              # Find the table and add the new chart entry
+              # This handles the case where the chart is new
+              awk -v chart="$CHART_NAME" -v chartVer="$CHART_VERSION" -v appVer="$APP_VERSION" '
+                BEGIN { 
+                  FS = "|"; OFS = "|"
+                  added = 0
+                }
+                {
+                  print
+                  # If we find the header row and haven't added yet
+                  if ($0 ~ /\| Chart.*\| Version.*\| App Version.*\| Description/ && !added) {
+                    # Print the separator line first
+                    getline
+                    print
+                    # Add our new chart entry
+                    print "| [" chart "](charts/" chart "/) | " chartVer " | " appVer " | A Kubernetes operator that automatically manages HashiCorp Vault initialization and unsealing using transit unseal |"
+                    added = 1
+                  }
+                }
+              ' "$README_FILE" > "$README_FILE.tmp" && mv "$README_FILE.tmp" "$README_FILE"
+            fi
             
             echo "Updated README.md chart table:"
             echo "- Chart version: $CHART_VERSION"
