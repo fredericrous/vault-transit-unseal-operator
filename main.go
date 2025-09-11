@@ -41,32 +41,32 @@ func main() {
 	// Define all configuration flags
 	var (
 		// Core settings
-		metricsAddr      = flag.String("metrics-bind-address", ":8080", "The address the metric endpoint binds to")
-		probeAddr        = flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to")
+		metricsAddr          = flag.String("metrics-bind-address", ":8080", "The address the metric endpoint binds to")
+		probeAddr            = flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to")
 		enableLeaderElection = flag.Bool("leader-elect", false, "Enable leader election for controller manager")
-		leaderElectionID = flag.String("leader-election-id", "vault-transit-unseal-operator", "Leader election ID")
-		
+		leaderElectionID     = flag.String("leader-election-id", "vault-transit-unseal-operator", "Leader election ID")
+
 		// Operational settings
 		namespace               = flag.String("namespace", "vault", "Namespace to watch for Vault pods")
 		maxConcurrentReconciles = flag.Int("max-concurrent-reconciles", 3, "Maximum number of concurrent reconciles")
 		reconcileTimeout        = flag.Duration("reconcile-timeout", 5*time.Minute, "Timeout for each reconcile operation")
-		
+
 		// Feature flags
 		enableMetrics  = flag.Bool("metrics-enabled", true, "Enable metrics endpoint")
 		skipCRDInstall = flag.Bool("skip-crd-install", false, "Skip CRD installation")
-		
+
 		// Vault settings
 		vaultTimeout        = flag.Duration("vault-timeout", 30*time.Second, "Timeout for Vault API operations")
 		enableTLSValidation = flag.Bool("vault-tls-validation", true, "Enable TLS certificate validation for Vault")
-		
+
 		// Logging
-		logLevel = flag.String("zap-log-level", "info", "Zap log level (debug, info, warn, error)")
-		logDevel = flag.Bool("zap-devel", false, "Enable development mode logging")
-		logEncoder = flag.String("zap-encoder", "json", "Zap log encoding (json or console)")
-		logTimeEncoding = flag.String("zap-time-encoding", "iso8601", "Zap time encoding")
+		logLevel           = flag.String("zap-log-level", "info", "Zap log level (debug, info, warn, error)")
+		logDevel           = flag.Bool("zap-devel", false, "Enable development mode logging")
+		logEncoder         = flag.String("zap-encoder", "json", "Zap log encoding (json or console)")
+		logTimeEncoding    = flag.String("zap-time-encoding", "iso8601", "Zap time encoding")
 		logStacktraceLevel = flag.String("zap-stacktrace-level", "error", "Zap level at which to log stack traces")
 	)
-	
+
 	flag.Parse()
 
 	// Setup logging based on flags
@@ -89,7 +89,7 @@ func main() {
 			}
 		}(),
 	}
-	
+
 	// Set log level
 	switch *logLevel {
 	case "debug":
@@ -103,7 +103,7 @@ func main() {
 	default:
 		opts.Level = zapcore.InfoLevel
 	}
-	
+
 	// Set stacktrace level
 	switch *logStacktraceLevel {
 	case "debug":
@@ -117,7 +117,7 @@ func main() {
 	default:
 		opts.StacktraceLevel = zapcore.ErrorLevel
 	}
-	
+
 	// Set encoder
 	if *logEncoder == "console" {
 		opts.Encoder = zapcore.NewConsoleEncoder(zapcore.EncoderConfig{
@@ -159,22 +159,22 @@ func main() {
 		EnableMetrics:        *enableMetrics,
 		EnableLeaderElection: *enableLeaderElection,
 		SkipCRDInstall:       *skipCRDInstall,
-		
+
 		// Operational settings
 		ReconcileTimeout:        *reconcileTimeout,
 		MaxConcurrentReconciles: *maxConcurrentReconciles,
 		Namespace:               *namespace,
-		
+
 		// Vault settings
 		DefaultVaultTimeout: *vaultTimeout,
 		EnableTLSValidation: *enableTLSValidation,
-		
+
 		// Server settings
 		MetricsAddr:      *metricsAddr,
 		ProbeAddr:        *probeAddr,
 		LeaderElectionID: *leaderElectionID,
 	}
-	
+
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
 		setupLog.Error(err, "Invalid configuration")

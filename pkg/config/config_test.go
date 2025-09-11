@@ -9,7 +9,7 @@ import (
 
 func TestNewDefaultConfig(t *testing.T) {
 	cfg := NewDefaultConfig()
-	
+
 	assert.True(t, cfg.EnableMetrics)
 	assert.False(t, cfg.EnableLeaderElection)
 	assert.False(t, cfg.SkipCRDInstall)
