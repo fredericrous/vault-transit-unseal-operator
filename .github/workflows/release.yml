@@ -134,14 +134,6 @@ jobs:
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
           generate_release_notes: true
 
-      # Trigger Helm chart update workflow using repository_dispatch
-      - name: Trigger Helm Chart Update
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          event-type: helm-chart-update
-          client-payload: '{"version": "${{ steps.release_notes.outputs.VERSION }}", "release_body": "${{ github.event.release.body }}"}'
 
   security-scan:
     name: Security Scan
