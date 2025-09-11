@@ -126,8 +126,6 @@ jobs:
           ${PREV_TAG:+https://github.com/${{ github.repository }}/compare/$PREV_TAG...$VERSION}
           EOF
 
-      # Try to use a PAT if available for release creation to enable workflow triggers
-      # Falls back to GITHUB_TOKEN if no PAT is available
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -135,13 +133,12 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
           generate_release_notes: true
-          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
       
-      # Fallback: If no RELEASE_PAT, manually trigger post-release workflow
+      # Trigger post-release workflow manually since GITHUB_TOKEN doesn't trigger other workflows
       - name: Trigger Post-Release Workflow
-        if: ${{ secrets.RELEASE_PAT == '' && secrets.CHARTS_REPO_TOKEN != '' }}
+        if: success()
         run: |
-          echo "No RELEASE_PAT found, manually triggering post-release workflow..."
+          echo "Triggering post-release workflow..."
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \

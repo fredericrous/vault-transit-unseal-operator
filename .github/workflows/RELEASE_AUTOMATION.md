@@ -7,14 +7,11 @@ This repository implements an elegant two-stage release automation with clean se
 ```mermaid
 graph TD
     A[Push Tag v1.0.0] --> B[Release Workflow]
-    B --> C{RELEASE_PAT exists?}
-    C -->|Yes| D[Create Release with PAT]
-    C -->|No| E[Create Release with GITHUB_TOKEN]
-    D --> F[Post-Release Auto-Triggers]
-    E --> G[Manual Trigger Post-Release]
-    F --> H[Update Helm Chart]
-    G --> H
-    H --> I[PR in Charts Repo]
+    B --> C[Create Release]
+    C --> D[Trigger Post-Release via API]
+    D --> E[Post-Release Workflow]
+    E --> F[Trigger Helm Chart Update]
+    F --> G[PR in Charts Repo]
 ```
 
 ## Workflows
@@ -42,22 +39,20 @@ graph TD
 - Update charts repository README
 - Create PR with all changes
 
-## Elegant Design Benefits
+## Design Benefits
 
 1. **Separation of Concerns**: Each workflow has a single, well-defined responsibility
-2. **Extensibility**: Easy to add new post-release tasks without modifying the release workflow
-3. **Reliability**: Multiple fallback mechanisms for GitHub token limitations
-4. **Testability**: Can manually trigger any stage for debugging
+2. **Security**: Uses GITHUB_TOKEN for release creation (least privilege)
+3. **Reliability**: Explicit workflow triggering via API (no hidden dependencies)
+4. **Extensibility**: Easy to add new post-release tasks
+5. **Testability**: Can manually trigger any stage for debugging
 
-## Configuration
+## How It Works
 
-### Option 1: Full Automation (Recommended)
-Create a `RELEASE_PAT` secret with a GitHub Personal Access Token that has `repo` scope.
-This allows releases created by the workflow to trigger other workflows automatically.
-
-### Option 2: Graceful Degradation
-Without `RELEASE_PAT`, the system falls back to manually triggering the post-release workflow
-using workflow_dispatch, ensuring the automation still works.
+Since GitHub prevents workflows triggered by GITHUB_TOKEN from triggering other workflows (to prevent infinite loops), we explicitly trigger the post-release workflow using the GitHub API. This is:
+- **Secure**: No additional tokens needed for release creation
+- **Explicit**: Clear workflow dependencies
+- **Reliable**: Always works, no configuration needed
 
 ## Required Secrets
 
@@ -70,14 +65,6 @@ Personal Access Token with permissions to create PRs in the charts repository.
    - `repo` (full control of repositories)
    - `workflow` (update GitHub Action workflows)
 3. Add as repository secret: `CHARTS_REPO_TOKEN`
-
-### RELEASE_PAT (Optional but Recommended)
-Personal Access Token for this repository to enable workflow chaining.
-
-**Creating the token:**
-1. Same process as above but for this repository
-2. Only needs `repo` scope
-3. Add as repository secret: `RELEASE_PAT`
 
 ## Release Process
 
