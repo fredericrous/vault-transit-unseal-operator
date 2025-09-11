@@ -1,64 +1,83 @@
-# Release Automation Setup
+# Release Automation Architecture
 
-This document explains how the automated release process works and how to set it up.
+This repository implements an elegant two-stage release automation with clean separation of concerns.
 
-## Overview
+## Architecture Overview
 
-When a new tag is pushed (e.g., `v0.6.0`), the following automated process occurs:
+```mermaid
+graph TD
+    A[Push Tag v1.0.0] --> B[Release Workflow]
+    B --> C{RELEASE_PAT exists?}
+    C -->|Yes| D[Create Release with PAT]
+    C -->|No| E[Create Release with GITHUB_TOKEN]
+    D --> F[Post-Release Auto-Triggers]
+    E --> G[Manual Trigger Post-Release]
+    F --> H[Update Helm Chart]
+    G --> H
+    H --> I[PR in Charts Repo]
+```
 
-1. **Release Workflow** (`release.yml`):
-   - Builds and tests the operator
-   - Creates multi-platform Docker images
-   - Pushes images to GitHub Container Registry
-   - Creates a GitHub Release with release notes
-   - Runs security scans on the images
+## Workflows
 
-2. **Post Release Tasks** (`post-release.yaml`):
-   - Triggers when the release is published
-   - Initiates the Helm chart update process
+### 1. Release Workflow (`release.yml`)
+**Triggered by:** Git tag push (`v*`)  
+**Responsibilities:**
+- Build and test the operator
+- Create multi-platform Docker images
+- Push to GitHub Container Registry
+- Create GitHub Release with automated release notes
+- Run security scans (Trivy)
 
-3. **Update Helm Chart** (`update-helm-chart.yaml`):
-   - Updates the Helm chart in the `fredericrous/charts` repository
-   - Updates `appVersion` in Chart.yaml
-   - Bumps the chart version (patch increment)
-   - Updates version references in README.md
-   - Creates a PR with all changes
+### 2. Post-Release Workflow (`post-release.yaml`)
+**Triggered by:** Release published event OR manual dispatch  
+**Responsibilities:**
+- Trigger Helm chart update
+- Future: notifications, documentation updates, etc.
 
-## Setup Requirements
+### 3. Update Helm Chart (`update-helm-chart.yaml`)
+**Triggered by:** Post-release workflow  
+**Responsibilities:**
+- Update appVersion in Chart.yaml
+- Intelligent semantic version bumping
+- Update charts repository README
+- Create PR with all changes
 
-### 1. Personal Access Token (PAT)
+## Elegant Design Benefits
 
-The automation requires a Personal Access Token with permissions to:
-- Access the `fredericrous/charts` repository
-- Create pull requests
-- Trigger workflows
+1. **Separation of Concerns**: Each workflow has a single, well-defined responsibility
+2. **Extensibility**: Easy to add new post-release tasks without modifying the release workflow
+3. **Reliability**: Multiple fallback mechanisms for GitHub token limitations
+4. **Testability**: Can manually trigger any stage for debugging
 
-#### Creating the PAT:
+## Configuration
 
-1. Go to GitHub Settings → Developer settings → Personal access tokens → Classic tokens
-2. Click "Generate new token (classic)"
-3. Name: `CHARTS_REPO_TOKEN`
-4. Select scopes:
-   - `repo` (Full control of private repositories)
-   - `workflow` (Update GitHub Action workflows)
-5. Generate and copy the token
+### Option 1: Full Automation (Recommended)
+Create a `RELEASE_PAT` secret with a GitHub Personal Access Token that has `repo` scope.
+This allows releases created by the workflow to trigger other workflows automatically.
 
-#### Adding the PAT to Repository Secrets:
+### Option 2: Graceful Degradation
+Without `RELEASE_PAT`, the system falls back to manually triggering the post-release workflow
+using workflow_dispatch, ensuring the automation still works.
 
-1. Go to your `vault-transit-unseal-operator` repository
-2. Settings → Secrets and variables → Actions
-3. Click "New repository secret"
-4. Name: `CHARTS_REPO_TOKEN`
-5. Value: Paste your PAT
-6. Click "Add secret"
+## Required Secrets
 
-### 2. Ensure Workflows Have Correct Permissions
+### CHARTS_REPO_TOKEN (Required)
+Personal Access Token with permissions to create PRs in the charts repository.
 
-In your repository settings:
-1. Go to Settings → Actions → General
-2. Under "Workflow permissions":
-   - Select "Read and write permissions"
-   - Check "Allow GitHub Actions to create and approve pull requests"
+**Creating the token:**
+1. GitHub Settings → Developer settings → Personal access tokens
+2. Generate new token (classic) with scopes:
+   - `repo` (full control of repositories)
+   - `workflow` (update GitHub Action workflows)
+3. Add as repository secret: `CHARTS_REPO_TOKEN`
+
+### RELEASE_PAT (Optional but Recommended)
+Personal Access Token for this repository to enable workflow chaining.
+
+**Creating the token:**
+1. Same process as above but for this repository
+2. Only needs `repo` scope
+3. Add as repository secret: `RELEASE_PAT`
 
 ## Release Process
 
