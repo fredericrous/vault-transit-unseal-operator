@@ -136,12 +136,18 @@ jobs:
             # Check if chart exists in the table
             if grep -q "\[${CHART_NAME}\]" "$README_FILE"; then
               echo "Updating existing chart entry in README.md"
-              # Use sed to update the chart entry
-              sed -i "s|\[${CHART_NAME}\].*|\[${CHART_NAME}\](charts/${CHART_NAME}/) | ${CHART_VERSION} | ${APP_VERSION} | A Kubernetes operator that automatically manages HashiCorp Vault initialization and unsealing using transit unseal |" "$README_FILE"
+              # Create a temporary file with the updated content
+              while IFS= read -r line; do
+                if [[ "$line" == *"[${CHART_NAME}]"* ]]; then
+                  # This is our chart's line - replace it
+                  echo "| [${CHART_NAME}](charts/${CHART_NAME}/) | ${CHART_VERSION} | ${APP_VERSION} | A Kubernetes operator that automatically manages HashiCorp Vault initialization and unsealing using transit unseal |"
+                else
+                  echo "$line"
+                fi
+              done < "$README_FILE" > "$README_FILE.tmp" && mv "$README_FILE.tmp" "$README_FILE"
             else
-              echo "Chart not found in README.md - adding new entry"
-              # Add the chart entry after the table header
-              sed -i "/^|-------|/a | [${CHART_NAME}](charts/${CHART_NAME}/) | ${CHART_VERSION} | ${APP_VERSION} | A Kubernetes operator that automatically manages HashiCorp Vault initialization and unsealing using transit unseal |" "$README_FILE"
+              echo "Chart not found in README.md - skipping update"
+              echo "Manual intervention may be required to add the chart to README.md"
             fi
             
             echo "Updated README.md chart table:"
