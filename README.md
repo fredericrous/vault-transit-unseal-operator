@@ -15,6 +15,29 @@
 - Kubernetes 1.24+
 - Transit Vault instance (can be external)
 - Transit token with appropriate permissions
+- Vault configured with transit seal (see [Vault Configuration](#vault-configuration))
+
+## Vault Configuration
+
+**Important:** This operator does NOT replace Vault's seal configuration. Your Vault instance must be configured to use transit unsealing in its configuration file.
+
+Add the following to your Vault configuration (`vault.hcl`):
+
+```hcl
+# Transit auto-unseal configuration
+seal "transit" {
+  address         = "http://your-transit-vault:8200"
+  disable_renewal = "false"
+  key_name        = "autounseal"
+  mount_path      = "transit"
+  tls_skip_verify = "true"  # Only for development
+  
+  # The token can be injected via environment variable
+  token = "your-transit-token"  # or use VAULT_SEAL_TRANSIT_TOKEN env var
+}
+```
+
+The operator automates the unsealing process but requires Vault to be configured for transit unsealing. Without this configuration, Vault won't know how to decrypt its master key.
 
 ## Installation
 
@@ -60,6 +83,71 @@ spec:
 ```
 
 That's it! The operator will now automatically initialize and unseal your Vault pods.
+
+### Complete Example
+
+Here's how the Vault configuration and operator work together:
+
+```yaml
+# 1. Vault ConfigMap with transit seal configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: vault
+data:
+  vault.hcl: |
+    seal "transit" {
+      address = "http://transit-vault:8200"
+      key_name = "autounseal"
+      mount_path = "transit"
+      token = "TRANSIT_TOKEN_PLACEHOLDER"  # Will be replaced by init container
+    }
+    # ... rest of Vault config
+
+---
+# 2. Vault StatefulSet that uses the config
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vault
+  namespace: vault
+spec:
+  template:
+    spec:
+      initContainers:
+      - name: config-templater
+        # Replace token placeholder with actual secret
+        command: ["sh", "-c", "sed -i 's/TRANSIT_TOKEN_PLACEHOLDER/'$TOKEN'/g' /vault/config/vault.hcl"]
+        env:
+        - name: TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: vault-transit-token
+              key: token
+      containers:
+      - name: vault
+        image: hashicorp/vault:1.20.1
+        args: ["server", "-config=/vault/config/vault.hcl"]
+
+---
+# 3. VaultTransitUnseal CRD that manages unsealing
+apiVersion: vault.homelab.io/v1alpha1
+kind: VaultTransitUnseal
+metadata:
+  name: vault-main
+  namespace: vault
+spec:
+  vaultPod:
+    selector:
+      app: vault
+  transitVault:
+    address: http://transit-vault:8200  # Same as in vault.hcl
+    secretRef:
+      name: vault-transit-token  # Same secret as StatefulSet
+```
+
+The operator handles the unsealing lifecycle, but Vault must be configured to use transit sealing.
 
 ## Advanced Configuration
 
