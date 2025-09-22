@@ -127,7 +127,7 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 // ProcessPod handles processing of a single vault pod
 func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) error {
 	if !r.isPodReady(pod) {
-		return fmt.Errorf("pod not ready")
+		return fmt.Errorf("pod not running (waiting for vault container to start)")
 	}
 
 	// Create Vault client for this pod
@@ -275,8 +275,10 @@ func (r *VaultReconciler) isPodReady(pod *corev1.Pod) bool {
 	}
 
 	for _, cs := range pod.Status.ContainerStatuses {
-		if cs.Name == "vault" && cs.Ready {
-			return true
+		if cs.Name == "vault" {
+			// For uninitialized Vault, container will be running but not ready
+			// Check if container is started instead of ready
+			return cs.Started != nil && *cs.Started
 		}
 	}
 
