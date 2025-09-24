@@ -19,7 +19,7 @@ spec:
   vaultPod:
     namespace: vault
     selector:
-      app: vault
+      app.kubernetes.io/name: vault
   transitVault:
     # Address is now loaded from ConfigMap
     addressFrom:

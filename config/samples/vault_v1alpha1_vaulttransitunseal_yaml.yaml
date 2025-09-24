@@ -23,7 +23,7 @@ spec:
   vaultPod:
     namespace: vault
     selector:
-      app: vault
+      app.kubernetes.io/name: vault
   transitVault:
     # Extract address from YAML structure in ConfigMap
     addressFrom:

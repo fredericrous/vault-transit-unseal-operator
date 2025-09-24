@@ -72,7 +72,7 @@ metadata:
 spec:
   vaultPod:
     selector:
-      app: vault
+      app.kubernetes.io/name: vault
   transitVault:
     address: http://transit-vault:8200
     secretRef:
@@ -140,7 +140,7 @@ metadata:
 spec:
   vaultPod:
     selector:
-      app: vault
+      app.kubernetes.io/name: vault
   transitVault:
     address: http://transit-vault:8200  # Same as in vault.hcl
     secretRef:
