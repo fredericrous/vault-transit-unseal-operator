@@ -79,7 +79,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
 
       - name: Generate release notes
         id: release_notes
@@ -133,7 +133,7 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
           generate_release_notes: true
-      
+
       # Trigger post-release workflow using PAT with workflow scope
       - name: Trigger Post-Release Workflow
         if: success()
@@ -144,7 +144,7 @@ jobs:
             echo "::warning::WORKFLOW_TOKEN not set, skipping post-release workflow trigger"
             exit 0
           fi
-          
+
           echo "Triggering post-release workflow..."
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
