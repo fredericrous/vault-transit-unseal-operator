@@ -16,8 +16,8 @@ COPY api/ api/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
 
-# Build with proper flags for smaller binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} \
+# Build with proper flags for smaller binary (native compilation)
+RUN CGO_ENABLED=0 GOOS=linux \
     go build -a -trimpath -ldflags="-w -s" -o manager main.go
 
 # Runtime stage
