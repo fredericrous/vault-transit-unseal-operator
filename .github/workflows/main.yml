@@ -6,6 +6,7 @@ on:
 
 env:
   GO_VERSION: '1.25'
+  ENVTEST_K8S_VERSION: '1.29.0'
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -36,14 +37,31 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
+      - name: Cache envtest binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/testbin
+            ~/.cache/kubebuilder-envtest
+            ${{ github.workspace }}/bin
+          key: envtest-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ env.ENVTEST_K8S_VERSION }}
+          restore-keys: |
+            envtest-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            envtest-${{ runner.os }}-
+
       - name: Install dependencies
         run: |
           make controller-gen
           make envtest
 
+      - name: Setup envtest environment
+        run: |
+          echo "KUBEBUILDER_ASSETS=$(${{ github.workspace }}/bin/setup-envtest use ${{ env.ENVTEST_K8S_VERSION }} --bin-dir ${{ github.workspace }}/bin -p path)" >> $GITHUB_ENV
+
       - name: Run tests
         env:
-          KUBEBUILDER_ASSETS: "${{ github.workspace }}/bin/k8s/1.29.0-linux-amd64"
+          KUBEBUILDER_CONTROLPLANE_START_TIMEOUT: 60s
+          KUBEBUILDER_CONTROLPLANE_STOP_TIMEOUT: 60s
         run: |
           make test-unit
           make test-integration
