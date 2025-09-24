@@ -228,6 +228,7 @@ func (f *mockTransitClientFactory) NewClient(address, token, keyName, mountPath 
 
 // Helper function to create a ready pod
 func createReadyPod(name, namespace string, labels map[string]string) *corev1.Pod {
+	started := true
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -238,8 +239,9 @@ func createReadyPod(name, namespace string, labels map[string]string) *corev1.Po
 			Phase: corev1.PodRunning,
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
-					Name:  "vault",
-					Ready: true,
+					Name:    "vault",
+					Ready:   true,
+					Started: &started,
 				},
 			},
 		},
@@ -584,11 +586,11 @@ var _ = Describe("VaultReconciler", func() {
 		})
 
 		It("should skip unready pods", func() {
-			pod.Status.ContainerStatuses[0].Ready = false
+			pod.Status.ContainerStatuses[0].Started = nil
 
 			err := vaultReconciler.ProcessPod(ctx, pod, vtu)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("pod not ready"))
+			Expect(err.Error()).To(ContainSubstring("pod not running (waiting for vault container to start)"))
 		})
 
 		It("should initialize uninitialized vault", func() {
