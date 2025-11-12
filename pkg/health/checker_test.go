@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
@@ -137,17 +138,20 @@ func TestReadiness(t *testing.T) {
 	checker, s := setupTest(t)
 
 	tests := []struct {
-		name         string
-		objects      []runtime.Object
-		vaultFactory VaultClientFactory
-		wantReady    bool
-		wantMessage  string
+		name          string
+		objects       []runtime.Object
+		vaultFactory  VaultClientFactory
+		clientWrapper func(ctrlclient.WithWatch) ctrlclient.WithWatch
+		wantReady     bool
+		wantHealthy   bool
+		wantMessage   string
 	}{
 		{
 			name:         "no resources to manage",
 			objects:      []runtime.Object{},
 			vaultFactory: &mockVaultClientFactory{},
 			wantReady:    true,
+			wantHealthy:  true,
 			wantMessage:  "no VaultTransitUnseal resources to manage",
 		},
 		{
@@ -167,7 +171,8 @@ func TestReadiness(t *testing.T) {
 				},
 			},
 			vaultFactory: &mockVaultClientFactory{},
-			wantReady:    false,
+			wantReady:    true,
+			wantHealthy:  false,
 			wantMessage:  "no Vault pods found",
 		},
 		{
@@ -205,6 +210,7 @@ func TestReadiness(t *testing.T) {
 				},
 			},
 			wantReady:   true,
+			wantHealthy: true,
 			wantMessage: "all 1 Vault pods are healthy",
 		},
 		{
@@ -256,6 +262,7 @@ func TestReadiness(t *testing.T) {
 				},
 			},
 			wantReady:   true,
+			wantHealthy: true,
 			wantMessage: "1/2 Vault pods are healthy",
 		},
 		{
@@ -292,7 +299,8 @@ func TestReadiness(t *testing.T) {
 					"vault-0": {healthy: false},
 				},
 			},
-			wantReady:   false,
+			wantReady:   true,
+			wantHealthy: false,
 			wantMessage: "no healthy Vault pods (0/1)",
 		},
 		{
@@ -322,7 +330,8 @@ func TestReadiness(t *testing.T) {
 				},
 			},
 			vaultFactory: &mockVaultClientFactory{},
-			wantReady:    false,
+			wantReady:    true,
+			wantHealthy:  false,
 			wantMessage:  "no healthy Vault pods (0/1)",
 		},
 		{
@@ -355,8 +364,22 @@ func TestReadiness(t *testing.T) {
 				},
 			},
 			vaultFactory: &mockVaultClientFactory{},
-			wantReady:    false,
+			wantReady:    true,
+			wantHealthy:  false,
 			wantMessage:  "no healthy Vault pods (0/1)",
+		},
+		{
+			name:    "list resources fails",
+			objects: []runtime.Object{},
+			vaultFactory: &mockVaultClientFactory{
+				clients: map[string]*mockVaultClient{},
+			},
+			clientWrapper: func(c ctrlclient.WithWatch) ctrlclient.WithWatch {
+				return &errorListClient{WithWatch: c}
+			},
+			wantReady:   false,
+			wantHealthy: false,
+			wantMessage: "failed to list VaultTransitUnseal resources: simulated failure",
 		},
 	}
 
@@ -366,6 +389,9 @@ func TestReadiness(t *testing.T) {
 				WithScheme(s).
 				WithRuntimeObjects(tt.objects...).
 				Build()
+			if tt.clientWrapper != nil {
+				client = tt.clientWrapper(client)
+			}
 
 			checker.client = client
 			checker.vaultFactory = tt.vaultFactory
@@ -381,10 +407,19 @@ func TestReadiness(t *testing.T) {
 			// Check last status
 			result, checkTime := checker.GetLastStatus()
 			assert.Equal(t, tt.wantReady, result.Ready)
+			assert.Equal(t, tt.wantHealthy, result.Healthy)
 			assert.Equal(t, tt.wantMessage, result.Message)
 			assert.WithinDuration(t, time.Now(), checkTime, time.Second)
 		})
 	}
+}
+
+type errorListClient struct {
+	ctrlclient.WithWatch
+}
+
+func (e *errorListClient) List(ctx context.Context, list ctrlclient.ObjectList, opts ...ctrlclient.ListOption) error {
+	return fmt.Errorf("simulated failure")
 }
 
 func TestGetLastStatus(t *testing.T) {

@@ -111,17 +111,20 @@ func (h *Checker) performCheck(ctx context.Context) CheckResult {
 	result := CheckResult{
 		VaultPods:     totalPods,
 		HealthyVaults: healthyPods,
-		Ready:         healthyPods > 0,
-		Healthy:       healthyPods > 0,
+		Healthy:       healthyPods > 0 || totalPods == 0,
+		Ready:         true,
 	}
 
-	if totalPods == 0 {
+	switch {
+	case totalPods == 0:
+		result.Healthy = false
 		result.Message = "no Vault pods found"
-	} else if healthyPods == 0 {
+	case healthyPods == 0:
+		result.Healthy = false
 		result.Message = fmt.Sprintf("no healthy Vault pods (0/%d)", totalPods)
-	} else if healthyPods < totalPods {
+	case healthyPods < totalPods:
 		result.Message = fmt.Sprintf("%d/%d Vault pods are healthy", healthyPods, totalPods)
-	} else {
+	default:
 		result.Message = fmt.Sprintf("all %d Vault pods are healthy", totalPods)
 	}
 
