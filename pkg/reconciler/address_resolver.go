@@ -84,30 +84,21 @@ func resolveFromConfigMap(ctx context.Context, c client.Client, log logr.Logger,
 
 	// First try to get the value with the full key (in case it contains dots)
 	value, exists := configMap.Data[ref.Key]
-	if !exists {
-		// If the key doesn't exist as-is and contains dots, try to parse as YAML path
-		if strings.Contains(ref.Key, ".") {
-			// Split into base key and path
-			parts := strings.SplitN(ref.Key, ".", 2)
-			baseKey := parts[0]
-			yamlPath := parts[1]
+	resolvedKey := ref.Key
 
-			// Try to get the base key
-			if yamlValue, ok := configMap.Data[baseKey]; ok {
-				// Try to extract from YAML
-				extractedValue, err := extractYAMLValue(yamlValue, yamlPath)
-				if err == nil {
-					return extractedValue, nil
-				}
-				// If extraction failed, log but continue to default handling
-				log.V(1).Info("Failed to extract YAML value",
-					"key", ref.Key,
-					"baseKey", baseKey,
-					"path", yamlPath,
-					"error", err)
-			}
+	if !exists && strings.Contains(ref.Key, ".") {
+		if extractedValue, baseKey, err := extractCompositeConfigMapValue(configMap.Data, ref.Key); err == nil {
+			value = extractedValue
+			exists = true
+			resolvedKey = baseKey
+		} else {
+			log.V(1).Info("Failed to extract YAML value",
+				"key", ref.Key,
+				"error", err)
 		}
+	}
 
+	if !exists {
 		// Key not found
 		if defaultValue != "" {
 			log.V(1).Info("Key not found in ConfigMap, using default value",
@@ -122,12 +113,12 @@ func resolveFromConfigMap(ctx context.Context, c client.Client, log logr.Logger,
 	if value == "" {
 		if defaultValue != "" {
 			log.V(1).Info("Key in ConfigMap is empty, using default value",
-				"key", ref.Key,
+				"key", resolvedKey,
 				"configMap", fmt.Sprintf("%s/%s", namespace, ref.Name),
 				"default", defaultValue)
 			return defaultValue, nil
 		}
-		return "", fmt.Errorf("key %s in ConfigMap %s/%s is empty", ref.Key, namespace, ref.Name)
+		return "", fmt.Errorf("key %s in ConfigMap %s/%s is empty", resolvedKey, namespace, ref.Name)
 	}
 
 	return value, nil
@@ -238,4 +229,43 @@ func extractYAMLValue(yamlContent string, keyPath string) (string, error) {
 	default:
 		return "", fmt.Errorf("value at path %s is not a scalar value", keyPath)
 	}
+}
+
+// extractCompositeConfigMapValue finds the longest matching ConfigMap key prefix and extracts nested YAML path.
+func extractCompositeConfigMapValue(data map[string]string, compositeKey string) (string, string, error) {
+	var matchedKey string
+
+	for key := range data {
+		prefix := key + "."
+		if strings.HasPrefix(compositeKey, prefix) {
+			if len(key) > len(matchedKey) {
+				matchedKey = key
+			}
+		}
+	}
+
+	if matchedKey == "" {
+		parts := strings.SplitN(compositeKey, ".", 2)
+		if len(parts) != 2 {
+			return "", "", fmt.Errorf("invalid key format: %s", compositeKey)
+		}
+
+		baseKey := parts[0]
+		yamlPath := parts[1]
+		yamlValue, ok := data[baseKey]
+		if !ok {
+			return "", "", fmt.Errorf("base key %s not found in ConfigMap", baseKey)
+		}
+
+		value, err := extractYAMLValue(yamlValue, yamlPath)
+		return value, baseKey, err
+	}
+
+	yamlPath := strings.TrimPrefix(compositeKey, matchedKey+".")
+	if yamlPath == "" {
+		return "", "", fmt.Errorf("no YAML path specified after key %s", matchedKey)
+	}
+
+	value, err := extractYAMLValue(data[matchedKey], yamlPath)
+	return value, matchedKey, err
 }

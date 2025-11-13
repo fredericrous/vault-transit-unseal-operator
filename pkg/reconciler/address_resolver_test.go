@@ -76,6 +76,41 @@ func TestResolveTransitVaultAddress(t *testing.T) {
 			expectError:  false,
 		},
 		{
+			name: "address from structured configmap key",
+			vtu: &vaultv1alpha1.VaultTransitUnseal{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test",
+					Namespace: "vault",
+				},
+				Spec: vaultv1alpha1.VaultTransitUnsealSpec{
+					TransitVault: vaultv1alpha1.TransitVaultSpec{
+						AddressFrom: &vaultv1alpha1.AddressReference{
+							ConfigMapKeyRef: &vaultv1alpha1.ConfigMapKeyReference{
+								Name: "vault-config",
+								Key:  "config.yaml.environments.production.transit.address",
+							},
+						},
+					},
+				},
+			},
+			objects: []client.Object{
+				&corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "vault-config",
+						Namespace: "vault",
+					},
+					Data: map[string]string{
+						"config.yaml": `environments:
+  production:
+    transit:
+      address: "https://vault.vault.mesh:8200"`,
+					},
+				},
+			},
+			expectedAddr: "https://vault.vault.mesh:8200",
+			expectError:  false,
+		},
+		{
 			name: "address from configmap in different namespace",
 			vtu: &vaultv1alpha1.VaultTransitUnseal{
 				ObjectMeta: metav1.ObjectMeta{
