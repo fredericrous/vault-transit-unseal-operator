@@ -25,14 +25,16 @@ type RecoveryManager struct {
 	client.Client
 	Log      logr.Logger
 	Recorder record.EventRecorder
+	Scheme   *runtime.Scheme
 }
 
 // NewRecoveryManager creates a new recovery manager
-func NewRecoveryManager(client client.Client, log logr.Logger, recorder record.EventRecorder) *RecoveryManager {
+func NewRecoveryManager(client client.Client, log logr.Logger, recorder record.EventRecorder, scheme *runtime.Scheme) *RecoveryManager {
 	return &RecoveryManager{
 		Client:   client,
 		Log:      log,
 		Recorder: recorder,
+		Scheme:   scheme,
 	}
 }
 
@@ -119,8 +121,14 @@ func (r *RecoveryManager) recoverTransitToken(ctx context.Context, vtu *vaultv1a
 		},
 	}
 
-	if err := controllerutil.SetControllerReference(vtu, secret, r.Scheme()); err != nil {
-		return fmt.Errorf("setting controller reference: %w", err)
+	// Only set controller reference if in the same namespace to avoid cross-namespace ownership
+	if vtu.Namespace == secret.Namespace {
+		if err := controllerutil.SetControllerReference(vtu, secret, r.Scheme); err != nil {
+			return fmt.Errorf("setting controller reference: %w", err)
+		}
+	} else {
+		// Add annotation to indicate ownership when we can't use owner references
+		secret.Annotations["vault.homelab.io/managed-by"] = fmt.Sprintf("%s/%s", vtu.Namespace, vtu.Name)
 	}
 
 	if err := r.Create(ctx, secret); err != nil {
@@ -130,9 +138,9 @@ func (r *RecoveryManager) recoverTransitToken(ctx context.Context, vtu *vaultv1a
 	return fmt.Errorf("transit token requires manual recovery - placeholder created")
 }
 
-// recoverAdminToken attempts to recover the admin token
+// recoverAdminToken attempts to guide recovery of the admin token
 func (r *RecoveryManager) recoverAdminToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, action RecoveryAction, vaultClient vault.Client) error {
-	r.Log.Info("Attempting to recover admin token")
+	r.Log.Info("Admin token is missing")
 
 	// Check if Vault is initialized and unsealed
 	status, err := vaultClient.CheckStatus(ctx)
@@ -141,53 +149,33 @@ func (r *RecoveryManager) recoverAdminToken(ctx context.Context, vtu *vaultv1alp
 	}
 
 	if !status.Initialized || status.Sealed {
-		return fmt.Errorf("cannot recover admin token: vault is not initialized or is sealed")
+		return r.createRecoveryPlaceholder(ctx, vtu, action,
+			"Cannot recover admin token: vault is not initialized or is sealed")
 	}
 
-	// Try to generate a new root token if we have recovery keys
-	recoveryKeys, err := r.getRecoveryKeys(ctx, vtu)
+	// Check if we have recovery keys
+	_, err = r.getRecoveryKeys(ctx, vtu)
 	if err != nil {
-		r.Log.Error(err, "Cannot recover admin token without recovery keys")
-		return r.createRecoveryPlaceholder(ctx, vtu, action, "Admin token missing - requires recovery keys or manual intervention")
+		r.Log.Error(err, "Cannot automatically recover admin token without recovery keys")
+		return r.createRecoveryPlaceholder(ctx, vtu, action,
+			"Admin token missing - manual recovery required using 'vault operator generate-root' with recovery keys")
 	}
 
-	// Generate new root token using recovery keys
-	newToken, err := r.generateRootToken(ctx, vaultClient, recoveryKeys)
-	if err != nil {
-		r.Log.Error(err, "Failed to generate new root token")
-		return r.createRecoveryPlaceholder(ctx, vtu, action, fmt.Sprintf("Failed to generate root token: %v", err))
+	// We have recovery keys but automatic generation is not implemented
+	r.Log.Info("Automatic root token generation is not implemented",
+		"action", "Use 'vault operator generate-root' manually with the recovery keys")
+
+	// Record an event with clear instructions
+	if r.Recorder != nil {
+		r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "ManualRecoveryRequired",
+			"Admin token is missing. Manual recovery required: kubectl exec into vault pod and run 'vault operator generate-root' with recovery keys from secret %s/%s",
+			vtu.Spec.VaultPod.Namespace, vtu.Spec.Initialization.SecretNames.RecoveryKeys)
 	}
 
-	// Store the new admin token
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      action.SecretName,
-			Namespace: action.Namespace,
-			Annotations: map[string]string{
-				"vault.homelab.io/recovered":     "true",
-				"vault.homelab.io/recovery-time": time.Now().Format(time.RFC3339),
-			},
-		},
-		Data: map[string][]byte{
-			"token": []byte(newToken),
-		},
-	}
-
-	// Apply any configured annotations
-	for k, v := range vtu.Spec.Initialization.SecretNames.AdminTokenAnnotations {
-		secret.Annotations[k] = v
-	}
-
-	if err := controllerutil.SetControllerReference(vtu, secret, r.Scheme()); err != nil {
-		return fmt.Errorf("setting controller reference: %w", err)
-	}
-
-	if err := r.Create(ctx, secret); err != nil {
-		return fmt.Errorf("creating recovered admin token secret: %w", err)
-	}
-
-	r.Log.Info("Successfully recovered admin token")
-	return nil
+	// Create placeholder with detailed instructions
+	return r.createRecoveryPlaceholder(ctx, vtu, action,
+		fmt.Sprintf("Admin token missing - use 'vault operator generate-root' with recovery keys from %s/%s",
+			vtu.Spec.VaultPod.Namespace, vtu.Spec.Initialization.SecretNames.RecoveryKeys))
 }
 
 // recoverRecoveryKeys attempts to recover recovery keys
@@ -201,15 +189,47 @@ func (r *RecoveryManager) recoverRecoveryKeys(ctx context.Context, vtu *vaultv1a
 	return r.createRecoveryPlaceholder(ctx, vtu, action, "Recovery keys missing - requires re-initialization or restore from backup")
 }
 
-// updateIncompleteSecret updates a secret that's missing some keys
+// updateIncompleteSecret handles a secret that's missing some keys
 func (r *RecoveryManager) updateIncompleteSecret(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, action RecoveryAction) error {
-	r.Log.Info("Updating incomplete secret",
+	r.Log.Info("Secret is incomplete, manual intervention required",
 		"namespace", action.Namespace,
 		"name", action.SecretName)
 
-	// This would need specific logic based on which keys are missing
-	// For now, we'll log and create placeholders
-	return fmt.Errorf("incomplete secret update not yet implemented for %s", action.SecretName)
+	// Get the existing secret to preserve any valid data
+	existingSecret := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: action.Namespace,
+		Name:      action.SecretName,
+	}, existingSecret); err != nil {
+		return fmt.Errorf("getting existing secret: %w", err)
+	}
+
+	// Add annotations to indicate the secret is incomplete
+	if existingSecret.Annotations == nil {
+		existingSecret.Annotations = make(map[string]string)
+	}
+	existingSecret.Annotations["vault.homelab.io/incomplete"] = "true"
+	existingSecret.Annotations["vault.homelab.io/incomplete-reason"] = action.Description
+	existingSecret.Annotations["vault.homelab.io/incomplete-time"] = time.Now().Format(time.RFC3339)
+
+	// Update the secret with annotations
+	if err := r.Update(ctx, existingSecret); err != nil {
+		return fmt.Errorf("updating incomplete secret annotations: %w", err)
+	}
+
+	// Record an event
+	if r.Recorder != nil {
+		r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "IncompleteSecret",
+			"Secret %s/%s is incomplete: %s. Manual intervention required.",
+			action.Namespace, action.SecretName, action.Description)
+	}
+
+	// Don't return an error - just log the warning
+	// This allows the operator to continue functioning with partial secrets
+	r.Log.Info("Marked secret as incomplete, continuing with partial functionality",
+		"secret", fmt.Sprintf("%s/%s", action.Namespace, action.SecretName))
+
+	return nil
 }
 
 // createRecoveryPlaceholder creates a placeholder secret with recovery instructions
@@ -229,8 +249,14 @@ func (r *RecoveryManager) createRecoveryPlaceholder(ctx context.Context, vtu *va
 		},
 	}
 
-	if err := controllerutil.SetControllerReference(vtu, secret, r.Scheme()); err != nil {
-		return fmt.Errorf("setting controller reference: %w", err)
+	// Only set controller reference if in the same namespace to avoid cross-namespace ownership
+	if vtu.Namespace == secret.Namespace {
+		if err := controllerutil.SetControllerReference(vtu, secret, r.Scheme); err != nil {
+			return fmt.Errorf("setting controller reference: %w", err)
+		}
+	} else {
+		// Add annotation to indicate ownership when we can't use owner references
+		secret.Annotations["vault.homelab.io/managed-by"] = fmt.Sprintf("%s/%s", vtu.Namespace, vtu.Name)
 	}
 
 	if err := r.Create(ctx, secret); err != nil {
@@ -267,22 +293,6 @@ func (r *RecoveryManager) getRecoveryKeys(ctx context.Context, vtu *vaultv1alpha
 	}
 
 	return keys, nil
-}
-
-// generateRootToken generates a new root token using recovery keys
-func (r *RecoveryManager) generateRootToken(ctx context.Context, vaultClient vault.Client, recoveryKeys []string) (string, error) {
-	// This is a simplified version - actual implementation would use Vault's
-	// generate-root API with the recovery keys
-
-	// For now, return an error indicating manual intervention is needed
-	return "", fmt.Errorf("automatic root token generation not yet implemented - use vault operator generate-root")
-}
-
-// Scheme returns the scheme from the embedded client
-func (r *RecoveryManager) Scheme() *runtime.Scheme {
-	// This would need to be passed in or retrieved from the client
-	// For now, return nil as it would be set during initialization
-	return nil
 }
 
 // GenerateSecureToken generates a cryptographically secure random token

@@ -74,7 +74,7 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	secretVerifier := secrets.NewVerifier(r.Client, r.Log.WithName("secret-verifier"))
 
 	// Create recovery manager
-	recoveryManager := secrets.NewRecoveryManager(r.Client, r.Log.WithName("recovery-manager"), r.Recorder)
+	recoveryManager := secrets.NewRecoveryManager(r.Client, r.Log.WithName("recovery-manager"), r.Recorder, r.Scheme)
 
 	// Create vault reconciler with all dependencies
 	r.VaultReconciler = &reconciler.VaultReconciler{
@@ -122,7 +122,7 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 // +kubebuilder:rbac:groups=vault.homelab.io,resources=vaulttransitunseals,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vault.homelab.io,resources=vaulttransitunseals/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;create;update
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete

@@ -164,7 +164,7 @@ func TestRecoverSecrets(t *testing.T) {
 				initialized: true,
 				sealed:      false,
 			},
-			expectError:    true, // Transit token requires manual recovery
+			expectError:    true, // Transit token returns error after creating placeholder
 			checkSecret:    "vault-transit-token",
 			checkNamespace: "vault",
 		},
@@ -207,7 +207,7 @@ func TestRecoverSecrets(t *testing.T) {
 				initialized: true,
 				sealed:      false,
 			},
-			expectError:    true, // Admin token recovery without recovery keys should fail
+			expectError:    false, // Admin token creates placeholder, no error returned
 			checkSecret:    "vault-admin-token",
 			checkNamespace: "vault",
 		},
@@ -250,7 +250,7 @@ func TestRecoverSecrets(t *testing.T) {
 				initialized: false,
 				sealed:      true,
 			},
-			expectError: true,
+			expectError: false, // Creates placeholder, no error
 		},
 		{
 			name: "recover missing recovery keys - should create placeholder",
@@ -291,7 +291,7 @@ func TestRecoverSecrets(t *testing.T) {
 				initialized: true,
 				sealed:      false,
 			},
-			expectError:    true, // Recovery keys cannot be recovered
+			expectError:    false, // Recovery keys create placeholder, no error
 			checkSecret:    "vault-recovery-keys",
 			checkNamespace: "vault",
 		},
@@ -312,7 +312,7 @@ func TestRecoverSecrets(t *testing.T) {
 			// Create recovery manager
 			logger := testr.New(t)
 			recorder := record.NewFakeRecorder(100)
-			manager := NewRecoveryManager(client, logger, recorder)
+			manager := NewRecoveryManager(client, logger, recorder, scheme)
 
 			// Attempt recovery
 			ctx := context.Background()
@@ -332,8 +332,8 @@ func TestRecoverSecrets(t *testing.T) {
 					Namespace: tt.checkNamespace,
 				}, secret)
 
-				// For failed recoveries, we should have created a placeholder
-				if tt.expectError {
+				// Should have created a placeholder (unless it's the transit token which returns an error)
+				if !tt.expectError || tt.checkSecret == "vault-transit-token" {
 					assert.NoError(t, err, "Expected placeholder secret to be created")
 					assert.Contains(t, secret.Annotations, "vault.homelab.io/recovery-required")
 					assert.Equal(t, "true", secret.Annotations["vault.homelab.io/recovery-required"])
