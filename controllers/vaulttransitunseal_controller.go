@@ -30,6 +30,7 @@ import (
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/health"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/metrics"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/reconciler"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/secrets"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
 )
 
@@ -69,6 +70,12 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	// Create configurator
 	configurator := configuration.NewConfigurator(r.Log.WithName("configurator"))
 
+	// Create secret verifier
+	secretVerifier := secrets.NewVerifier(r.Client, r.Log.WithName("secret-verifier"))
+
+	// Create recovery manager
+	recoveryManager := secrets.NewRecoveryManager(r.Client, r.Log.WithName("recovery-manager"), r.Recorder)
+
 	// Create vault reconciler with all dependencies
 	r.VaultReconciler = &reconciler.VaultReconciler{
 		Client:          r.Client,
@@ -78,6 +85,8 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		SecretManager:   secretMgr,
 		MetricsRecorder: metricsRecorder,
 		Configurator:    configurator,
+		SecretVerifier:  secretVerifier,
+		RecoveryManager: recoveryManager,
 	}
 
 	// Create health checker

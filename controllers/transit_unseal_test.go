@@ -184,7 +184,7 @@ func TestVaultTransitUnsealReconciliation(t *testing.T) {
 // TestHomelabScenario tests the specific homelab dual vault setup
 func TestHomelabScenario(t *testing.T) {
 	// This test validates the specific homelab architecture:
-	// - QNAP vault (transit provider) at 192.168.1.42:61200
+	// - NAS vault (transit provider) reachable via tailnet
 	// - K8s vault using QNAP for transit unseal
 
 	scheme := runtime.NewScheme()
@@ -216,7 +216,7 @@ func TestHomelabScenario(t *testing.T) {
 				},
 			},
 			TransitVault: vaultv1alpha1.TransitVaultSpec{
-				Address: "http://192.168.1.42:61200",
+				Address: "http://vault.vault.svc.cluster.local:8200",
 				SecretRef: vaultv1alpha1.SecretReference{
 					Name: "qnap-vault-transit-token",
 					Key:  "token",
@@ -256,7 +256,7 @@ func TestHomelabScenario(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify transit configuration matches homelab setup
-		assert.Equal(t, "http://192.168.1.42:61200", vtu.Spec.TransitVault.Address)
+		assert.Equal(t, "http://vault.vault.svc.cluster.local:8200", vtu.Spec.TransitVault.Address)
 		assert.Equal(t, "qnap-vault-transit-token", vtu.Spec.TransitVault.SecretRef.Name)
 		assert.Equal(t, "k8s-vault-unseal", vtu.Spec.TransitVault.KeyName)
 		assert.Equal(t, "transit", vtu.Spec.TransitVault.MountPath)

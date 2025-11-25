@@ -15,6 +15,7 @@ import (
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/configuration"
 	operrors "github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/errors"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/secrets"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/transit"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
 )
@@ -28,6 +29,8 @@ type VaultReconciler struct {
 	SecretManager   SecretManager
 	MetricsRecorder MetricsRecorder
 	Configurator    *configuration.Configurator
+	SecretVerifier  *secrets.Verifier
+	RecoveryManager *secrets.RecoveryManager
 }
 
 // VaultClientFactory creates Vault clients
@@ -65,6 +68,38 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 	defer func() {
 		r.MetricsRecorder.RecordReconciliation(time.Since(start), result.Error == nil)
 	}()
+
+	// Verify expected secrets exist
+	if r.SecretVerifier != nil {
+		log.V(1).Info("Verifying expected secrets")
+		verificationResult, err := r.SecretVerifier.VerifyExpectedSecrets(ctx, vtu)
+		if err != nil {
+			log.Error(err, "Failed to verify secrets")
+			result.Error = operrors.NewTransientError("secret verification failed", err)
+			return result
+		}
+
+		// Log detailed verification results
+		r.SecretVerifier.LogMissingSecrets(verificationResult)
+
+		// Attempt recovery if secrets are missing and recovery manager is available
+		if !verificationResult.AllPresent && r.RecoveryManager != nil {
+			log.Info("Attempting to recover missing secrets")
+			// For recovery, we need a vault client - try to get one from the first available pod
+			pods, err := r.FindVaultPods(ctx, vtu)
+			if err == nil && len(pods) > 0 {
+				vaultClient, err := r.VaultFactory.NewClientForPod(&pods[0])
+				if err == nil {
+					if recErr := r.RecoveryManager.RecoverSecrets(ctx, vtu, verificationResult, vaultClient); recErr != nil {
+						log.Error(recErr, "Secret recovery failed")
+						if r.Recorder != nil {
+							r.Recorder.Event(vtu, corev1.EventTypeWarning, "SecretRecoveryFailed", recErr.Error())
+						}
+					}
+				}
+			}
+		}
+	}
 
 	// Validate transit token exists
 	if err := r.ValidateTransitToken(ctx, vtu); err != nil {
@@ -126,13 +161,18 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 
 // ProcessPod handles processing of a single vault pod
 func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) error {
+	log := r.Log.WithValues("pod", pod.Name, "namespace", pod.Namespace)
+
 	if !r.isPodReady(pod) {
+		log.V(1).Info("Pod not ready, waiting for vault container to start")
 		return fmt.Errorf("pod not running (waiting for vault container to start)")
 	}
 
 	// Create Vault client for this pod
+	log.V(1).Info("Creating vault client for pod")
 	vaultClient, err := r.VaultFactory.NewClientForPod(pod)
 	if err != nil {
+		log.Error(err, "Failed to create vault client")
 		return fmt.Errorf("creating vault client: %w", err)
 	}
 
@@ -140,10 +180,17 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 	statusCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	log.V(1).Info("Checking vault status")
 	status, err := vaultClient.CheckStatus(statusCtx)
 	if err != nil {
+		log.Error(err, "Failed to check vault status")
 		return fmt.Errorf("checking vault status: %w", err)
 	}
+
+	log.Info("Vault status",
+		"initialized", status.Initialized,
+		"sealed", status.Sealed,
+		"version", status.Version)
 
 	// Update metrics
 	r.MetricsRecorder.RecordVaultStatus(status.Initialized, status.Sealed)
@@ -155,6 +202,20 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 			return fmt.Errorf("initializing vault: %w", err)
 		}
 		r.MetricsRecorder.RecordInitialization(true)
+
+		// Verify secrets were created after initialization
+		if r.SecretVerifier != nil {
+			log.Info("Verifying secrets after initialization")
+			verificationResult, err := r.SecretVerifier.VerifyExpectedSecrets(ctx, vtu)
+			if err != nil {
+				log.Error(err, "Post-initialization secret verification failed")
+			} else if !verificationResult.AllPresent {
+				log.Error(nil, "Expected secrets missing after initialization",
+					"missingCount", len(verificationResult.Missing),
+					"incompleteCount", len(verificationResult.Incomplete))
+				r.SecretVerifier.LogMissingSecrets(verificationResult)
+			}
+		}
 	}
 
 	// Update conditions
@@ -162,7 +223,9 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 
 	// If vault is sealed, attempt to unseal it
 	if status.Sealed && status.Initialized {
+		log.Info("Vault is sealed, attempting to unseal")
 		if err := r.UnsealVault(ctx, vaultClient, vtu); err != nil {
+			log.Error(err, "Failed to unseal vault")
 			return fmt.Errorf("unsealing vault: %w", err)
 		}
 
@@ -172,8 +235,31 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 			return fmt.Errorf("checking vault status after unseal: %w", err)
 		}
 
+		log.Info("Vault unseal completed", "sealed", status.Sealed)
+
 		// Update metrics after unseal
 		r.MetricsRecorder.RecordVaultStatus(status.Initialized, status.Sealed)
+	}
+
+	// Periodically verify expected secrets exist when vault is initialized
+	if status.Initialized && r.SecretVerifier != nil {
+		log.V(1).Info("Running periodic secret verification")
+		verificationResult, err := r.SecretVerifier.VerifyExpectedSecrets(ctx, vtu)
+		if err != nil {
+			log.Error(err, "Periodic secret verification failed")
+		} else if !verificationResult.AllPresent {
+			log.Info("Expected secrets missing during periodic check",
+				"missingCount", len(verificationResult.Missing),
+				"incompleteCount", len(verificationResult.Incomplete))
+			r.SecretVerifier.LogMissingSecrets(verificationResult)
+
+			// Record event for missing secrets
+			if r.Recorder != nil {
+				r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "MissingSecrets",
+					"Missing %d secrets, %d incomplete secrets detected",
+					len(verificationResult.Missing), len(verificationResult.Incomplete))
+			}
+		}
 	}
 
 	// If vault is unsealed and initialized, apply post-unseal configuration

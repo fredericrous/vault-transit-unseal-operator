@@ -21,11 +21,11 @@ func TestExtractYAMLValue(t *testing.T) {
 		{
 			name: "nested yaml extraction",
 			yamlContent: `transit:
-  address: "http://192.168.1.42:61200"
+  address: "http://vault.vault.svc.cluster.local:8200"
   mountPath: "transit"
   keyName: "autounseal"`,
 			keyPath:  "transit.address",
-			expected: "http://192.168.1.42:61200",
+			expected: "http://vault.vault.svc.cluster.local:8200",
 		},
 		{
 			name: "deeply nested value",
@@ -39,14 +39,14 @@ func TestExtractYAMLValue(t *testing.T) {
 		{
 			name: "missing key",
 			yamlContent: `transit:
-  address: "http://192.168.1.42:61200"`,
+  address: "http://vault.vault.svc.cluster.local:8200"`,
 			keyPath:     "transit.missing",
 			expectError: true,
 		},
 		{
 			name: "invalid path - not an object",
 			yamlContent: `transit:
-  address: "http://192.168.1.42:61200"`,
+  address: "http://vault.vault.svc.cluster.local:8200"`,
 			keyPath:     "transit.address.invalid",
 			expectError: true,
 		},

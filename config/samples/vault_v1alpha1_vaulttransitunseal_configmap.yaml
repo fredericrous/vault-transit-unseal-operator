@@ -6,7 +6,7 @@ metadata:
   name: vault-config
   namespace: vault
 data:
-  qnap.address: "http://192.168.1.42:61200"
+  qnap.address: "http://vault.vault.svc.cluster.local:8200"
   qnap.mount.path: "transit"
   qnap.key.name: "autounseal"
 ---

@@ -36,11 +36,11 @@ func TestResolveTransitVaultAddress(t *testing.T) {
 				},
 				Spec: vaultv1alpha1.VaultTransitUnsealSpec{
 					TransitVault: vaultv1alpha1.TransitVaultSpec{
-						Address: "http://192.168.1.42:61200",
+						Address: "http://vault.vault.svc.cluster.local:8200",
 					},
 				},
 			},
-			expectedAddr: "http://192.168.1.42:61200",
+			expectedAddr: "http://vault.vault.svc.cluster.local:8200",
 			expectError:  false,
 		},
 		{
@@ -68,11 +68,11 @@ func TestResolveTransitVaultAddress(t *testing.T) {
 						Namespace: "vault",
 					},
 					Data: map[string]string{
-						"qnap.address": "http://nas.local:61200",
+						"qnap.address": "https://nas-vault.tailnet:8200",
 					},
 				},
 			},
-			expectedAddr: "http://nas.local:61200",
+			expectedAddr: "https://nas-vault.tailnet:8200",
 			expectError:  false,
 		},
 		{
@@ -103,11 +103,11 @@ func TestResolveTransitVaultAddress(t *testing.T) {
 						"config.yaml": `environments:
   production:
     transit:
-      address: "https://vault.vault.mesh:8200"`,
+      address: "https://vault.vault.mesh:15443"`,
 					},
 				},
 			},
-			expectedAddr: "https://vault.vault.mesh:8200",
+			expectedAddr: "https://vault.vault.mesh:15443",
 			expectError:  false,
 		},
 		{
@@ -136,11 +136,11 @@ func TestResolveTransitVaultAddress(t *testing.T) {
 						Namespace: "config",
 					},
 					Data: map[string]string{
-						"qnap.address": "http://nas.local:61200",
+						"qnap.address": "https://nas-vault.tailnet:8200",
 					},
 				},
 			},
-			expectedAddr: "http://nas.local:61200",
+			expectedAddr: "https://nas-vault.tailnet:8200",
 			expectError:  false,
 		},
 		{
