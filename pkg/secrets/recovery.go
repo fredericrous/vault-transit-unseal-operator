@@ -87,6 +87,13 @@ func (r *RecoveryManager) recoverMissingSecret(ctx context.Context, vtu *vaultv1
 		return r.recoverTransitToken(ctx, vtu, action)
 
 	case vtu.Spec.Initialization.SecretNames.AdminToken:
+		// Check if admin token creation is skipped
+		if vtu.Spec.Initialization.SecretNames.SkipAdminTokenCreation {
+			r.Log.Info("Admin token creation is disabled, skipping recovery",
+				"namespace", action.Namespace,
+				"name", action.SecretName)
+			return nil
+		}
 		return r.recoverAdminToken(ctx, vtu, action, vaultClient)
 
 	case vtu.Spec.Initialization.SecretNames.RecoveryKeys:

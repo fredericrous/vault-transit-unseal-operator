@@ -163,13 +163,16 @@ func (v *Verifier) getExpectedSecrets(vtu *vaultv1alpha1.VaultTransitUnseal) []E
 			Keys:      []string{vtu.Spec.TransitVault.SecretRef.Key},
 			Optional:  false,
 		},
-		// Admin token should exist if vault is initialized
-		{
+	}
+
+	// Admin token is only expected if not skipped
+	if !vtu.Spec.Initialization.SecretNames.SkipAdminTokenCreation {
+		secrets = append(secrets, ExpectedSecret{
 			Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
 			Namespace: namespace,
 			Keys:      []string{"token"},
 			Optional:  false, // Required after initialization
-		},
+		})
 	}
 
 	// Recovery keys are optional based on configuration

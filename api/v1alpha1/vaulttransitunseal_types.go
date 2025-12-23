@@ -119,6 +119,11 @@ type SecretNamesSpec struct {
 	// +kubebuilder:default=false
 	StoreRecoveryKeys bool `json:"storeRecoveryKeys,omitempty"`
 
+	// Skip creating admin token secret (for external token management)
+	// When true, the operator will not create placeholder admin tokens
+	// +kubebuilder:default=false
+	SkipAdminTokenCreation bool `json:"skipAdminTokenCreation,omitempty"`
+
 	// Annotations to add to the admin token secret
 	// +optional
 	AdminTokenAnnotations map[string]string `json:"adminTokenAnnotations,omitempty"`
@@ -236,6 +241,104 @@ type ArgoCDSpec struct {
 	WaitTimeout string `json:"waitTimeout,omitempty"`
 }
 
+// TokenManagementSpec defines how admin tokens are managed
+type TokenManagementSpec struct {
+	// Enable automatic token management
+	// +kubebuilder:default=true
+	Enabled bool `json:"enabled"`
+
+	// Token creation strategy
+	// +kubebuilder:validation:Enum=immediate;delayed;external
+	// +kubebuilder:default="delayed"
+	Strategy TokenStrategy `json:"strategy,omitempty"`
+
+	// Delay before creating token (for delayed strategy)
+	// +kubebuilder:default="30s"
+	CreationDelay string `json:"creationDelay,omitempty"`
+
+	// Policy to attach to admin token
+	// +kubebuilder:default="vault-admin"
+	PolicyName string `json:"policyName,omitempty"`
+
+	// Token TTL
+	// +kubebuilder:default="24h"
+	TTL string `json:"ttl,omitempty"`
+
+	// Enable automatic token renewal
+	// +kubebuilder:default=true
+	AutoRenew bool `json:"autoRenew,omitempty"`
+
+	// Enable automatic token rotation
+	// +kubebuilder:default=true
+	AutoRotate bool `json:"autoRotate,omitempty"`
+
+	// Rotation period
+	// +kubebuilder:default="720h"
+	RotationPeriod string `json:"rotationPeriod,omitempty"`
+
+	// Dependencies that must be ready before creating token
+	Dependencies TokenDependencies `json:"dependencies,omitempty"`
+}
+
+type TokenStrategy string
+
+const (
+	// Create token immediately after Vault is initialized
+	TokenStrategyImmediate TokenStrategy = "immediate"
+
+	// Wait for dependencies before creating token
+	TokenStrategyDelayed TokenStrategy = "delayed"
+
+	// Don't create token, let external system handle it
+	TokenStrategyExternal TokenStrategy = "external"
+)
+
+type TokenDependencies struct {
+	// Wait for specific deployments to be ready
+	Deployments []DeploymentDependency `json:"deployments,omitempty"`
+
+	// Wait for specific jobs to complete
+	Jobs []JobDependency `json:"jobs,omitempty"`
+
+	// Custom conditions to wait for
+	CustomConditions []CustomCondition `json:"customConditions,omitempty"`
+}
+
+type DeploymentDependency struct {
+	// Name of the deployment (supports prefix matching)
+	Name string `json:"name"`
+
+	// Namespace of the deployment
+	Namespace string `json:"namespace"`
+
+	// Minimum ready replicas
+	// +kubebuilder:default=1
+	MinReadyReplicas int32 `json:"minReadyReplicas,omitempty"`
+}
+
+type JobDependency struct {
+	// Name of the job
+	Name string `json:"name"`
+
+	// Namespace of the job
+	Namespace string `json:"namespace"`
+
+	// Wait for successful completion
+	// +kubebuilder:default=true
+	WaitForSuccess bool `json:"waitForSuccess,omitempty"`
+}
+
+type CustomCondition struct {
+	// Type of resource to check
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	Namespace  string `json:"namespace"`
+
+	// JSONPath expression that should evaluate to true
+	Condition string `json:"condition"`
+}
+
 // VaultTransitUnsealSpec defines the desired state of VaultTransitUnseal
 type VaultTransitUnsealSpec struct {
 	// Vault pods to manage
@@ -255,6 +358,9 @@ type VaultTransitUnsealSpec struct {
 
 	// ArgoCD integration settings
 	ArgoCD *ArgoCDSpec `json:"argocd,omitempty"`
+
+	// Token management configuration
+	TokenManagement *TokenManagementSpec `json:"tokenManagement,omitempty"`
 }
 
 // Condition represents the state of a VaultTransitUnseal at a certain point
@@ -289,6 +395,9 @@ type VaultTransitUnsealStatus struct {
 	// Configuration status
 	ConfigurationStatus ConfigurationStatus `json:"configurationStatus,omitempty"`
 
+	// Token management status
+	TokenStatus TokenStatus `json:"tokenStatus,omitempty"`
+
 	// Current conditions
 	Conditions []Condition `json:"conditions,omitempty"`
 }
@@ -307,6 +416,55 @@ type ConfigurationStatus struct {
 	// Last time ESO was configured
 	ExternalSecretsOperatorConfiguredTime string `json:"externalSecretsOperatorConfiguredTime,omitempty"`
 }
+
+// TokenStatus tracks the state of managed tokens
+type TokenStatus struct {
+	// Current state of the token
+	State TokenState `json:"state,omitempty"`
+
+	// When the token was created
+	CreatedAt string `json:"createdAt,omitempty"`
+
+	// When the token was last renewed
+	LastRenewedAt string `json:"lastRenewedAt,omitempty"`
+
+	// When the token will expire
+	ExpiresAt string `json:"expiresAt,omitempty"`
+
+	// When the token should be rotated
+	NextRotationAt string `json:"nextRotationAt,omitempty"`
+
+	// Token accessor for management operations
+	Accessor string `json:"accessor,omitempty"`
+
+	// Error message if token creation failed
+	Error string `json:"error,omitempty"`
+
+	// Indicates if initial token creation is complete (for hybrid approach)
+	Initialized bool `json:"initialized,omitempty"`
+}
+
+type TokenState string
+
+const (
+	// Token not yet created
+	TokenStatePending TokenState = "Pending"
+
+	// Waiting for dependencies
+	TokenStateWaiting TokenState = "Waiting"
+
+	// Token is active and valid
+	TokenStateActive TokenState = "Active"
+
+	// Token needs renewal
+	TokenStateRenewing TokenState = "Renewing"
+
+	// Token needs rotation
+	TokenStateRotating TokenState = "Rotating"
+
+	// Token creation failed
+	TokenStateFailed TokenState = "Failed"
+)
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status

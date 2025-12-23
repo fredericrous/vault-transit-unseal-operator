@@ -16,6 +16,7 @@ import (
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/configuration"
 	operrors "github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/errors"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/secrets"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/token"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/transit"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
 )
@@ -31,6 +32,7 @@ type VaultReconciler struct {
 	Configurator    *configuration.Configurator
 	SecretVerifier  *secrets.Verifier
 	RecoveryManager *secrets.RecoveryManager
+	TokenManager    *token.SimpleManager
 }
 
 // VaultClientFactory creates Vault clients
@@ -262,26 +264,42 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 		}
 	}
 
-	// If vault is unsealed and initialized, apply post-unseal configuration
-	if !status.Sealed && status.Initialized && (vtu.Spec.PostUnsealConfig.EnableKV || vtu.Spec.PostUnsealConfig.EnableExternalSecretsOperator) && r.Configurator != nil {
-		log := r.Log.WithValues("pod", pod.Name)
-		log.V(1).Info("Applying post-unseal configuration")
-
-		// Get the admin token if available
-		adminToken, err := r.GetAdminToken(ctx, vtu)
-		if err != nil {
-			log.Error(err, "Failed to get admin token for configuration, skipping")
-			return nil
+	// If vault is unsealed and initialized, handle token management and post-unseal configuration
+	if !status.Sealed && status.Initialized {
+		// First, handle token management if enabled
+		if r.TokenManager != nil && vtu.Spec.TokenManagement != nil {
+			log.V(1).Info("Managing admin token")
+			if err := r.TokenManager.ReconcileInitialToken(ctx, vtu, vaultClient.GetAPIClient()); err != nil {
+				log.Error(err, "Failed to manage admin token")
+				// Don't fail the reconciliation, but record the event
+				if r.Recorder != nil {
+					r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "TokenManagementFailed",
+						"Failed to manage admin token: %v", err)
+				}
+			}
 		}
 
-		// Create a new client with admin token
-		apiClient := vaultClient.GetAPIClient()
-		apiClient.SetToken(string(adminToken))
+		// Then apply post-unseal configuration if needed
+		if (vtu.Spec.PostUnsealConfig.EnableKV || vtu.Spec.PostUnsealConfig.EnableExternalSecretsOperator) && r.Configurator != nil {
+			log := r.Log.WithValues("pod", pod.Name)
+			log.V(1).Info("Applying post-unseal configuration")
 
-		// Apply configuration
-		if err := r.Configurator.Configure(ctx, apiClient, vtu.Spec.PostUnsealConfig, &vtu.Status.ConfigurationStatus); err != nil {
-			log.Error(err, "Failed to apply post-unseal configuration")
-			// Don't fail the reconciliation for configuration errors
+			// Get the admin token if available
+			adminToken, err := r.GetAdminToken(ctx, vtu)
+			if err != nil {
+				log.Error(err, "Failed to get admin token for configuration, skipping")
+				return nil
+			}
+
+			// Create a new client with admin token
+			apiClient := vaultClient.GetAPIClient()
+			apiClient.SetToken(string(adminToken))
+
+			// Apply configuration
+			if err := r.Configurator.Configure(ctx, apiClient, vtu.Spec.PostUnsealConfig, &vtu.Status.ConfigurationStatus); err != nil {
+				log.Error(err, "Failed to apply post-unseal configuration")
+				// Don't fail the reconciliation for configuration errors
+			}
 		}
 	}
 

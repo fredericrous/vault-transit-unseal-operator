@@ -100,6 +100,12 @@ spec:
                           type: string
                         description: Annotations to add to the recovery keys secret
                         type: object
+                      skipAdminTokenCreation:
+                        default: false
+                        description: |-
+                          Skip creating admin token secret (for external token management)
+                          When true, the operator will not create placeholder admin tokens
+                        type: boolean
                       storeRecoveryKeys:
                         default: false
                         description: |-
@@ -192,6 +198,117 @@ spec:
                         description: KV version
                         type: integer
                     type: object
+                type: object
+              tokenManagement:
+                description: Token management configuration
+                properties:
+                  autoRenew:
+                    default: true
+                    description: Enable automatic token renewal
+                    type: boolean
+                  autoRotate:
+                    default: true
+                    description: Enable automatic token rotation
+                    type: boolean
+                  creationDelay:
+                    default: 30s
+                    description: Delay before creating token (for delayed strategy)
+                    type: string
+                  dependencies:
+                    description: Dependencies that must be ready before creating token
+                    properties:
+                      customConditions:
+                        description: Custom conditions to wait for
+                        items:
+                          properties:
+                            apiVersion:
+                              description: Type of resource to check
+                              type: string
+                            condition:
+                              description: JSONPath expression that should evaluate
+                                to true
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - condition
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                        type: array
+                      deployments:
+                        description: Wait for specific deployments to be ready
+                        items:
+                          properties:
+                            minReadyReplicas:
+                              default: 1
+                              description: Minimum ready replicas
+                              format: int32
+                              type: integer
+                            name:
+                              description: Name of the deployment (supports prefix
+                                matching)
+                              type: string
+                            namespace:
+                              description: Namespace of the deployment
+                              type: string
+                          required:
+                          - name
+                          - namespace
+                          type: object
+                        type: array
+                      jobs:
+                        description: Wait for specific jobs to complete
+                        items:
+                          properties:
+                            name:
+                              description: Name of the job
+                              type: string
+                            namespace:
+                              description: Namespace of the job
+                              type: string
+                            waitForSuccess:
+                              default: true
+                              description: Wait for successful completion
+                              type: boolean
+                          required:
+                          - name
+                          - namespace
+                          type: object
+                        type: array
+                    type: object
+                  enabled:
+                    default: true
+                    description: Enable automatic token management
+                    type: boolean
+                  policyName:
+                    default: vault-admin
+                    description: Policy to attach to admin token
+                    type: string
+                  rotationPeriod:
+                    default: 720h
+                    description: Rotation period
+                    type: string
+                  strategy:
+                    default: delayed
+                    description: Token creation strategy
+                    enum:
+                    - immediate
+                    - delayed
+                    - external
+                    type: string
+                  ttl:
+                    default: 24h
+                    description: Token TTL
+                    type: string
+                required:
+                - enabled
                 type: object
               transitVault:
                 description: Transit Vault configuration
@@ -345,6 +462,31 @@ spec:
               sealed:
                 description: Whether Vault is sealed
                 type: boolean
+              tokenStatus:
+                description: Token management status
+                properties:
+                  accessor:
+                    description: Token accessor for management operations
+                    type: string
+                  createdAt:
+                    description: When the token was created
+                    type: string
+                  error:
+                    description: Error message if token creation failed
+                    type: string
+                  expiresAt:
+                    description: When the token will expire
+                    type: string
+                  lastRenewedAt:
+                    description: When the token was last renewed
+                    type: string
+                  nextRotationAt:
+                    description: When the token should be rotated
+                    type: string
+                  state:
+                    description: Current state of the token
+                    type: string
+                type: object
             type: object
         type: object
     served: true
