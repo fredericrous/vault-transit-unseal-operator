@@ -124,9 +124,9 @@ func (m *SimpleManager) createInitialToken(ctx context.Context, vtu *vaultv1alph
 	now := time.Now()
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
-			Namespace: vtu.Spec.VaultPod.Namespace,
-			Annotations: m.buildLifecycleAnnotations(vtu, resp, now),
+			Name:        vtu.Spec.Initialization.SecretNames.AdminToken,
+			Namespace:   vtu.Spec.VaultPod.Namespace,
+			Annotations: m.buildLifecycleAnnotations(vtu, resp.Auth, now),
 		},
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
@@ -158,7 +158,7 @@ func (m *SimpleManager) createInitialToken(ctx context.Context, vtu *vaultv1alph
 		vtu.Status.TokenStatus.ExpiresAt = expiresAt.Format(time.RFC3339)
 	}
 
-	m.Log.Info("Initial admin token created successfully", 
+	m.Log.Info("Initial admin token created successfully",
 		"accessor", resp.Auth.Accessor,
 		"ttl", ttl,
 		"kyverno_managed", true)
@@ -182,15 +182,15 @@ func (m *SimpleManager) buildLifecycleAnnotations(vtu *vaultv1alpha1.VaultTransi
 	annotations["vault.homelab.io/token-accessor"] = resp.Accessor
 	annotations["vault.homelab.io/token-ttl"] = vtu.Spec.TokenManagement.TTL
 	annotations["vault.homelab.io/token-policies"] = vtu.Spec.TokenManagement.PolicyName
-	
+
 	if vtu.Spec.TokenManagement.AutoRenew {
 		annotations["vault.homelab.io/auto-renew"] = "true"
 	}
-	
+
 	if vtu.Spec.TokenManagement.AutoRotate {
 		annotations["vault.homelab.io/auto-rotate"] = "true"
 		annotations["vault.homelab.io/rotation-period"] = vtu.Spec.TokenManagement.RotationPeriod
-		
+
 		// Calculate next rotation
 		rotationPeriod, _ := time.ParseDuration(vtu.Spec.TokenManagement.RotationPeriod)
 		nextRotation := now.Add(rotationPeriod)
@@ -217,14 +217,14 @@ func (m *SimpleManager) tokenExists(ctx context.Context, vtu *vaultv1alpha1.Vaul
 		Namespace: vtu.Spec.VaultPod.Namespace,
 		Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
 	}, secret)
-	
+
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return false, nil
 		}
 		return false, err
 	}
-	
+
 	// Check if it has actual token data
 	if _, hasToken := secret.Data["token"]; hasToken {
 		// Also check if it's marked as initialized (not a placeholder)
@@ -232,13 +232,13 @@ func (m *SimpleManager) tokenExists(ctx context.Context, vtu *vaultv1alpha1.Vaul
 			return true, nil
 		}
 	}
-	
+
 	return false, nil
 }
 
 func (m *SimpleManager) ensurePolicy(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, vaultClient *vaultapi.Client) error {
 	policyName := vtu.Spec.TokenManagement.PolicyName
-	
+
 	// Default vault-admin policy
 	policy := `
 # Admin access to most paths
@@ -276,7 +276,7 @@ path "auth/token/renew-self" {
 func (m *SimpleManager) checkDependencies(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) (bool, error) {
 	// For hybrid approach, we only need basic dependency checking
 	// Kyverno will handle more complex dependency scenarios
-	
+
 	for _, dep := range vtu.Spec.TokenManagement.Dependencies.Deployments {
 		// Just check if deployment exists (don't need complex ready checks)
 		deployment := &appsv1.Deployment{}
@@ -284,7 +284,7 @@ func (m *SimpleManager) checkDependencies(ctx context.Context, vtu *vaultv1alpha
 			Namespace: dep.Namespace,
 			Name:      dep.Name,
 		}, deployment)
-		
+
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				m.Log.Info("Deployment dependency not found",
@@ -294,7 +294,7 @@ func (m *SimpleManager) checkDependencies(ctx context.Context, vtu *vaultv1alpha
 			}
 			return false, err
 		}
-		
+
 		if deployment.Status.ReadyReplicas < dep.MinReadyReplicas {
 			m.Log.Info("Deployment not ready",
 				"namespace", dep.Namespace,
@@ -304,6 +304,6 @@ func (m *SimpleManager) checkDependencies(ctx context.Context, vtu *vaultv1alpha
 			return false, nil
 		}
 	}
-	
+
 	return true, nil
 }
