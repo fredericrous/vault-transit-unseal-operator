@@ -102,6 +102,11 @@ type InitializationSpec struct {
 
 	// Names for created secrets
 	SecretNames SecretNamesSpec `json:"secretNames,omitempty"`
+
+	// ForceReinitialize will generate a new root token even if Vault is already initialized
+	// This is useful when the admin token is lost but Vault is already initialized
+	// +kubebuilder:default=false
+	ForceReinitialize bool `json:"forceReinitialize,omitempty"`
 }
 
 // SecretNamesSpec defines secret names

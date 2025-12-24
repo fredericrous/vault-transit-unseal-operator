@@ -120,7 +120,8 @@ kubectl apply -f config/crd/bases/vault.homelab.io_vaulttransitunseals.yaml
 
 # Deploy operator with simplified token manager
 kubectl set image deployment/vault-transit-unseal-operator-controller-manager \
-  manager=ghcr.io/fredericrous/vault-transit-unseal-operator:hybrid-v1
+  manager=ghcr.io/fredericrous/vault-transit-unseal-operator:latest \
+  -n vault
 ```
 
 ### Step 2: Update VaultTransitUnseal Resource
@@ -141,13 +142,9 @@ spec:
         minReadyReplicas: 1
 ```
 
-### Step 3: Build Token Manager Image
+### Step 3: Token Manager Image
 
-```bash
-cd kubernetes/homelab/security/policies/vault-token-lifecycle/vault-token-manager
-docker build -t ghcr.io/fredericrous/vault-token-manager:latest .
-docker push ghcr.io/fredericrous/vault-token-manager:latest
-```
+The vault-token-manager image is automatically built and pushed by GitHub Actions when changes are made to the vault-token-manager directory. No manual build required!
 
 ### Step 4: Deploy Kyverno Policies
 

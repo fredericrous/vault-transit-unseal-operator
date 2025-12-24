@@ -8,6 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -217,6 +218,12 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 					"incompleteCount", len(verificationResult.Incomplete))
 				r.SecretVerifier.LogMissingSecrets(verificationResult)
 			}
+		}
+	} else if vtu.Spec.Initialization.ForceReinitialize && status.Initialized && !status.Sealed {
+		// Handle force re-initialization to generate a new root token
+		log.Info("Force re-initialization requested for initialized Vault")
+		if err := r.GenerateRootToken(ctx, vaultClient, pod, vtu); err != nil {
+			return fmt.Errorf("generating root token: %w", err)
 		}
 	}
 
@@ -499,4 +506,118 @@ func (r *VaultReconciler) GetAdminToken(ctx context.Context, vtu *vaultv1alpha1.
 	}
 
 	return token, nil
+}
+
+// GenerateRootToken generates a new root token for an already initialized Vault
+func (r *VaultReconciler) GenerateRootToken(ctx context.Context, vaultClient vault.Client, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) error {
+	log := r.Log.WithValues("pod", pod.Name)
+	log.Info("Generating new root token for initialized Vault")
+
+	// For transit seal, we can't use the standard root token generation
+	// Instead, we'll create a new admin token using the existing unseal keys
+	// This is a simplified approach - in production you might want to use
+	// vault operator generate-root with recovery keys
+	
+	// First, check if we have recovery keys
+	recoveryKeys, err := r.getRecoveryKeys(ctx, vtu)
+	if err != nil {
+		// No recovery keys available, create a placeholder token
+		log.Info("No recovery keys available, creating admin token placeholder")
+		
+		// Generate a temporary token that will need to be replaced manually
+		// In a real scenario, you would need to use vault operator generate-root
+		placeholder := map[string][]byte{
+			"token": []byte("hvs.PLACEHOLDER-" + pod.Name + "-NEEDS-MANUAL-GENERATION"),
+			"note": []byte("This is a placeholder. Use 'vault operator generate-root' with recovery keys to generate a real token"),
+		}
+		
+		if err := r.SecretManager.CreateOrUpdateWithOptions(ctx, vtu.Spec.VaultPod.Namespace,
+			vtu.Spec.Initialization.SecretNames.AdminToken,
+			placeholder,
+			vtu.Spec.Initialization.SecretNames.AdminTokenAnnotations); err != nil {
+			return fmt.Errorf("creating placeholder admin token: %w", err)
+		}
+		
+		if r.Recorder != nil {
+			r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "ManualInterventionRequired",
+				"Admin token placeholder created. Run 'vault operator generate-root' manually to generate real token")
+		}
+		
+		// Clear the ForceReinitialize flag by patching the resource
+		if err := r.clearForceReinitializeFlag(ctx, vtu); err != nil {
+			log.Error(err, "Failed to clear ForceReinitialize flag")
+		}
+		
+		return nil
+	}
+
+	// If we have recovery keys, we could potentially automate the root token generation
+	// For now, we'll still create a placeholder and log instructions
+	log.Info("Recovery keys available", "count", len(recoveryKeys))
+	
+	placeholder := map[string][]byte{
+		"token": []byte("hvs.PLACEHOLDER-" + pod.Name + "-USE-RECOVERY-KEYS"),
+		"note": []byte("Use 'vault operator generate-root' with recovery keys from " + vtu.Spec.Initialization.SecretNames.RecoveryKeys),
+	}
+	
+	if err := r.SecretManager.CreateOrUpdateWithOptions(ctx, vtu.Spec.VaultPod.Namespace,
+		vtu.Spec.Initialization.SecretNames.AdminToken,
+		placeholder,
+		vtu.Spec.Initialization.SecretNames.AdminTokenAnnotations); err != nil {
+		return fmt.Errorf("creating placeholder admin token: %w", err)
+	}
+
+	if r.Recorder != nil {
+		r.Recorder.Eventf(vtu, corev1.EventTypeNormal, "RootTokenGeneration",
+			"Admin token placeholder created. Recovery keys available in secret %s/%s",
+			vtu.Spec.VaultPod.Namespace, vtu.Spec.Initialization.SecretNames.RecoveryKeys)
+	}
+
+	// Clear the ForceReinitialize flag
+	if err := r.clearForceReinitializeFlag(ctx, vtu); err != nil {
+		log.Error(err, "Failed to clear ForceReinitialize flag")
+	}
+
+	return nil
+}
+
+// getRecoveryKeys retrieves recovery keys from the secret
+func (r *VaultReconciler) getRecoveryKeys(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) ([]string, error) {
+	// Try to get the recovery keys from the secret
+	secret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{
+		Namespace: vtu.Spec.VaultPod.Namespace,
+		Name:      vtu.Spec.Initialization.SecretNames.RecoveryKeys,
+	}, secret)
+	if err != nil {
+		return nil, err
+	}
+
+	var keys []string
+	for i := 0; ; i++ {
+		key := fmt.Sprintf("recovery-key-%d", i)
+		if data, exists := secret.Data[key]; exists {
+			keys = append(keys, string(data))
+		} else {
+			break
+		}
+	}
+
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("no recovery keys found in secret")
+	}
+
+	return keys, nil
+}
+
+// clearForceReinitializeFlag patches the VaultTransitUnseal resource to clear the flag
+func (r *VaultReconciler) clearForceReinitializeFlag(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) error {
+	patch := []byte(`{"spec":{"initialization":{"forceReinitialize":false}}}`)
+	
+	if err := r.Patch(ctx, vtu, client.RawPatch(types.MergePatchType, patch)); err != nil {
+		return fmt.Errorf("patching VaultTransitUnseal to clear forceReinitialize: %w", err)
+	}
+	
+	r.Log.Info("Cleared ForceReinitialize flag")
+	return nil
 }

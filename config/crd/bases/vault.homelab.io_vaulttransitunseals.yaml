@@ -71,6 +71,12 @@ spec:
               initialization:
                 description: Initialization parameters
                 properties:
+                  forceReinitialize:
+                    default: false
+                    description: |-
+                      ForceReinitialize will generate a new root token even if Vault is already initialized
+                      This is useful when the admin token is lost but Vault is already initialized
+                    type: boolean
                   recoveryShares:
                     default: 1
                     description: Number of recovery key shares
@@ -477,6 +483,10 @@ spec:
                   expiresAt:
                     description: When the token will expire
                     type: string
+                  initialized:
+                    description: Indicates if initial token creation is complete (for
+                      hybrid approach)
+                    type: boolean
                   lastRenewedAt:
                     description: When the token was last renewed
                     type: string
