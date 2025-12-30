@@ -38,7 +38,7 @@ type VaultReconciler struct {
 
 // VaultClientFactory creates Vault clients
 type VaultClientFactory interface {
-	NewClientForPod(pod *corev1.Pod) (vault.Client, error)
+	NewClientForPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) (vault.Client, error)
 }
 
 // SecretManager handles K8s secret operations
@@ -91,7 +91,7 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 			// For recovery, we need a vault client - try to get one from the first available pod
 			pods, err := r.FindVaultPods(ctx, vtu)
 			if err == nil && len(pods) > 0 {
-				vaultClient, err := r.VaultFactory.NewClientForPod(&pods[0])
+				vaultClient, err := r.VaultFactory.NewClientForPod(ctx, &pods[0], vtu)
 				if err == nil {
 					if recErr := r.RecoveryManager.RecoverSecrets(ctx, vtu, verificationResult, vaultClient); recErr != nil {
 						log.Error(recErr, "Secret recovery failed")
@@ -173,7 +173,7 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 
 	// Create Vault client for this pod
 	log.V(1).Info("Creating vault client for pod")
-	vaultClient, err := r.VaultFactory.NewClientForPod(pod)
+	vaultClient, err := r.VaultFactory.NewClientForPod(ctx, pod, vtu)
 	if err != nil {
 		log.Error(err, "Failed to create vault client")
 		return fmt.Errorf("creating vault client: %w", err)

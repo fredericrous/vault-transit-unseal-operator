@@ -34,7 +34,7 @@ type mockVaultClientFactory struct {
 	clients map[string]*mockVaultClient
 }
 
-func (f *mockVaultClientFactory) NewClientForPod(pod *corev1.Pod) (vault.Client, error) {
+func (f *mockVaultClientFactory) NewClientForPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) (vault.Client, error) {
 	if client, ok := f.clients[pod.Name]; ok {
 		return client, nil
 	}

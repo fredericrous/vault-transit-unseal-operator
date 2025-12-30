@@ -403,6 +403,21 @@ spec:
                       type: string
                     description: Label selector for Vault pods
                     type: object
+                  serviceName:
+                    description: |-
+                      Service name to connect to Vault (optional)
+                      If not specified, the operator will auto-discover the service using the pod selector
+                    type: string
+                  servicePort:
+                    default: 8200
+                    description: Service port to connect to Vault
+                    format: int32
+                    type: integer
+                  vaultAddress:
+                    description: |-
+                      Override the full Vault address (e.g., https://vault.example.com:8200)
+                      This takes precedence over service discovery
+                    type: string
                 required:
                 - namespace
                 - selector

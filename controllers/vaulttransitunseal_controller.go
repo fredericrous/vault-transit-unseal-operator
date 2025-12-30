@@ -26,6 +26,7 @@ import (
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/config"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/configuration"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/discovery"
 	operrors "github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/errors"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/health"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/metrics"
@@ -56,10 +57,17 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	// Create metrics recorder
 	metricsRecorder := metrics.NewRecorder()
 
+	// Create service discovery
+	serviceDiscovery := &discovery.ServiceDiscovery{
+		Client: r.Client,
+		Log:    r.Log.WithName("discovery"),
+	}
+
 	// Create vault client factory
 	vaultFactory := &vaultClientFactory{
 		tlsSkipVerify: !r.Config.EnableTLSValidation,
 		timeout:       r.Config.DefaultVaultTimeout,
+		discovery:     serviceDiscovery,
 	}
 
 	// Create secret manager
@@ -94,8 +102,9 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		TokenManager:    tokenManager,
 	}
 
-	// Create health checker
-	r.HealthChecker = health.NewChecker(r.Client, vaultFactory, r.Log.WithName("health"))
+	// Create health checker with simple factory wrapper
+	healthFactory := &healthVaultFactory{inner: vaultFactory}
+	r.HealthChecker = health.NewChecker(r.Client, healthFactory, r.Log.WithName("health"))
 
 	// Configure controller options
 	opts := controller.Options{
@@ -176,11 +185,20 @@ func (r *VaultTransitUnsealReconciler) Reconcile(ctx context.Context, req ctrl.R
 type vaultClientFactory struct {
 	tlsSkipVerify bool
 	timeout       time.Duration
+	discovery     *discovery.ServiceDiscovery
 }
 
-func (f *vaultClientFactory) NewClientForPod(pod *corev1.Pod) (vault.Client, error) {
+func (f *vaultClientFactory) NewClientForPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) (vault.Client, error) {
+	// Use service discovery to get the appropriate address
+	address, err := f.discovery.GetVaultAddress(ctx, &vtu.Spec.VaultPod)
+	if err != nil {
+		// Fallback to pod IP if service discovery fails
+		f.discovery.Log.Error(err, "Service discovery failed, falling back to pod IP")
+		address = fmt.Sprintf("http://%s:8200", pod.Status.PodIP)
+	}
+	
 	return vault.NewClient(&vault.Config{
-		Address:       fmt.Sprintf("http://%s:8200", pod.Status.PodIP),
+		Address:       address,
 		TLSSkipVerify: f.tlsSkipVerify,
 		Timeout:       f.timeout,
 	})
@@ -256,6 +274,20 @@ func (s *secretManager) Get(ctx context.Context, namespace, name, key string) ([
 	}
 
 	return value, nil
+}
+
+// healthVaultFactory wraps vaultClientFactory for health checks
+type healthVaultFactory struct {
+	inner *vaultClientFactory
+}
+
+func (h *healthVaultFactory) NewClientForPod(pod *corev1.Pod) (vault.Client, error) {
+	// For health checks, always use pod IP directly
+	return vault.NewClient(&vault.Config{
+		Address:       fmt.Sprintf("http://%s:8200", pod.Status.PodIP),
+		TLSSkipVerify: h.inner.tlsSkipVerify,
+		Timeout:       h.inner.timeout,
+	})
 }
 
 // Helper functions

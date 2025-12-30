@@ -11,6 +11,21 @@ type VaultPodSpec struct {
 
 	// Label selector for Vault pods
 	Selector map[string]string `json:"selector"`
+
+	// Service name to connect to Vault (optional)
+	// If not specified, the operator will auto-discover the service using the pod selector
+	// +optional
+	ServiceName string `json:"serviceName,omitempty"`
+
+	// Service port to connect to Vault
+	// +kubebuilder:default=8200
+	// +optional
+	ServicePort int32 `json:"servicePort,omitempty"`
+
+	// Override the full Vault address (e.g., https://vault.example.com:8200)
+	// This takes precedence over service discovery
+	// +optional
+	VaultAddress string `json:"vaultAddress,omitempty"`
 }
 
 // TransitVaultSpec defines the transit Vault configuration

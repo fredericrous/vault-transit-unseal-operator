@@ -15,10 +15,17 @@ func createTestReconciler(c client.Client) *VaultTransitUnsealReconciler {
 	cfg := config.NewDefaultConfig()
 	metricsRecorder := metrics.NewRecorder()
 
+	// Create service discovery
+	serviceDiscovery := &discovery.ServiceDiscovery{
+		Client: c,
+		Log:    ctrl.Log.WithName("discovery"),
+	}
+
 	// Create vault client factory
 	vaultFactory := &vaultClientFactory{
 		tlsSkipVerify: !cfg.EnableTLSValidation,
 		timeout:       cfg.DefaultVaultTimeout,
+		discovery:     serviceDiscovery,
 	}
 
 	// Create secret manager
