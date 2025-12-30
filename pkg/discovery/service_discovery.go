@@ -32,7 +32,7 @@ func (d *ServiceDiscovery) DiscoverVaultService(ctx context.Context, vaultSpec *
 
 	// 2. Auto-discover service using selector
 	d.Log.V(1).Info("Auto-discovering service", "namespace", vaultSpec.Namespace, "selector", vaultSpec.Selector)
-	
+
 	// List all services in the namespace
 	serviceList := &corev1.ServiceList{}
 	if err := d.Client.List(ctx, serviceList, client.InNamespace(vaultSpec.Namespace)); err != nil {
@@ -41,7 +41,7 @@ func (d *ServiceDiscovery) DiscoverVaultService(ctx context.Context, vaultSpec *
 
 	// Find services that match the pod selector
 	podSelector := labels.SelectorFromSet(vaultSpec.Selector)
-	
+
 	var matchingServices []corev1.Service
 	for _, svc := range serviceList.Items {
 		// Skip services without selectors
@@ -63,10 +63,10 @@ func (d *ServiceDiscovery) DiscoverVaultService(ctx context.Context, vaultSpec *
 
 	// Select the best matching service
 	selectedService := d.selectBestService(matchingServices)
-	
+
 	// Find the appropriate port
 	port := d.findVaultPort(selectedService)
-	
+
 	d.Log.Info("Auto-discovered service", "name", selectedService.Name, "port", port)
 	return selectedService.Name, port, nil
 }
@@ -92,7 +92,7 @@ func (d *ServiceDiscovery) selectorsMatch(podSelector, serviceSelector labels.Se
 func (d *ServiceDiscovery) selectBestService(services []corev1.Service) corev1.Service {
 	// Prefer services with common Vault naming patterns
 	preferredNames := []string{"vault", "vault-active", "vault-standby", "vault-internal"}
-	
+
 	for _, preferred := range preferredNames {
 		for _, svc := range services {
 			if svc.Name == preferred {
@@ -110,7 +110,7 @@ func (d *ServiceDiscovery) selectBestService(services []corev1.Service) corev1.S
 func (d *ServiceDiscovery) findVaultPort(service corev1.Service) int32 {
 	// Common vault port names
 	portNames := []string{"http", "vault", "api", ""}
-	
+
 	// First, look for ports by common names
 	for _, portName := range portNames {
 		for _, port := range service.Spec.Ports {
@@ -147,6 +147,6 @@ func (d *ServiceDiscovery) GetVaultAddress(ctx context.Context, vaultSpec *vault
 	// Construct the address
 	address := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, vaultSpec.Namespace, port)
 	d.Log.V(1).Info("Constructed vault address", "address", address)
-	
+
 	return address, nil
 }

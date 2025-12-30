@@ -196,7 +196,7 @@ func (f *vaultClientFactory) NewClientForPod(ctx context.Context, pod *corev1.Po
 		f.discovery.Log.Error(err, "Service discovery failed, falling back to pod IP")
 		address = fmt.Sprintf("http://%s:8200", pod.Status.PodIP)
 	}
-	
+
 	return vault.NewClient(&vault.Config{
 		Address:       address,
 		TLSSkipVerify: f.tlsSkipVerify,

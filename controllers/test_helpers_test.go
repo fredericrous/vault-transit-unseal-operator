@@ -5,6 +5,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/config"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/discovery"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/health"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/metrics"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/reconciler"
@@ -34,8 +35,9 @@ func createTestReconciler(c client.Client) *VaultTransitUnsealReconciler {
 		log:    ctrl.Log.WithName("secrets"),
 	}
 
-	// Create health checker
-	healthChecker := health.NewChecker(c, vaultFactory, ctrl.Log.WithName("health"))
+	// Create health checker with wrapper
+	healthFactory := &healthVaultFactory{inner: vaultFactory}
+	healthChecker := health.NewChecker(c, healthFactory, ctrl.Log.WithName("health"))
 
 	// Create vault reconciler with all dependencies
 	vaultReconciler := &reconciler.VaultReconciler{

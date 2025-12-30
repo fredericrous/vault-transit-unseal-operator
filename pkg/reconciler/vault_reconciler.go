@@ -517,49 +517,49 @@ func (r *VaultReconciler) GenerateRootToken(ctx context.Context, vaultClient vau
 	// Instead, we'll create a new admin token using the existing unseal keys
 	// This is a simplified approach - in production you might want to use
 	// vault operator generate-root with recovery keys
-	
+
 	// First, check if we have recovery keys
 	recoveryKeys, err := r.getRecoveryKeys(ctx, vtu)
 	if err != nil {
 		// No recovery keys available, create a placeholder token
 		log.Info("No recovery keys available, creating admin token placeholder")
-		
+
 		// Generate a temporary token that will need to be replaced manually
 		// In a real scenario, you would need to use vault operator generate-root
 		placeholder := map[string][]byte{
 			"token": []byte("hvs.PLACEHOLDER-" + pod.Name + "-NEEDS-MANUAL-GENERATION"),
-			"note": []byte("This is a placeholder. Use 'vault operator generate-root' with recovery keys to generate a real token"),
+			"note":  []byte("This is a placeholder. Use 'vault operator generate-root' with recovery keys to generate a real token"),
 		}
-		
+
 		if err := r.SecretManager.CreateOrUpdateWithOptions(ctx, vtu.Spec.VaultPod.Namespace,
 			vtu.Spec.Initialization.SecretNames.AdminToken,
 			placeholder,
 			vtu.Spec.Initialization.SecretNames.AdminTokenAnnotations); err != nil {
 			return fmt.Errorf("creating placeholder admin token: %w", err)
 		}
-		
+
 		if r.Recorder != nil {
 			r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "ManualInterventionRequired",
 				"Admin token placeholder created. Run 'vault operator generate-root' manually to generate real token")
 		}
-		
+
 		// Clear the ForceReinitialize flag by patching the resource
 		if err := r.clearForceReinitializeFlag(ctx, vtu); err != nil {
 			log.Error(err, "Failed to clear ForceReinitialize flag")
 		}
-		
+
 		return nil
 	}
 
 	// If we have recovery keys, we could potentially automate the root token generation
 	// For now, we'll still create a placeholder and log instructions
 	log.Info("Recovery keys available", "count", len(recoveryKeys))
-	
+
 	placeholder := map[string][]byte{
 		"token": []byte("hvs.PLACEHOLDER-" + pod.Name + "-USE-RECOVERY-KEYS"),
-		"note": []byte("Use 'vault operator generate-root' with recovery keys from " + vtu.Spec.Initialization.SecretNames.RecoveryKeys),
+		"note":  []byte("Use 'vault operator generate-root' with recovery keys from " + vtu.Spec.Initialization.SecretNames.RecoveryKeys),
 	}
-	
+
 	if err := r.SecretManager.CreateOrUpdateWithOptions(ctx, vtu.Spec.VaultPod.Namespace,
 		vtu.Spec.Initialization.SecretNames.AdminToken,
 		placeholder,
@@ -613,11 +613,11 @@ func (r *VaultReconciler) getRecoveryKeys(ctx context.Context, vtu *vaultv1alpha
 // clearForceReinitializeFlag patches the VaultTransitUnseal resource to clear the flag
 func (r *VaultReconciler) clearForceReinitializeFlag(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) error {
 	patch := []byte(`{"spec":{"initialization":{"forceReinitialize":false}}}`)
-	
+
 	if err := r.Patch(ctx, vtu, client.RawPatch(types.MergePatchType, patch)); err != nil {
 		return fmt.Errorf("patching VaultTransitUnseal to clear forceReinitialize: %w", err)
 	}
-	
+
 	r.Log.Info("Cleared ForceReinitialize flag")
 	return nil
 }
