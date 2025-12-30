@@ -17,24 +17,34 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/transit"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
 )
+
+// TokenManager interface for creating scoped tokens
+type TokenManager interface {
+	CreateScopedTokenFromRoot(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, rootToken string) (string, error)
+}
 
 // RecoveryManager handles recovery of missing secrets
 type RecoveryManager struct {
 	client.Client
-	Log      logr.Logger
-	Recorder record.EventRecorder
-	Scheme   *runtime.Scheme
+	Log           logr.Logger
+	Recorder      record.EventRecorder
+	Scheme        *runtime.Scheme
+	secretManager Manager
+	tokenManager  TokenManager
 }
 
 // NewRecoveryManager creates a new recovery manager
-func NewRecoveryManager(client client.Client, log logr.Logger, recorder record.EventRecorder, scheme *runtime.Scheme) *RecoveryManager {
+func NewRecoveryManager(client client.Client, log logr.Logger, recorder record.EventRecorder, scheme *runtime.Scheme, secretManager Manager, tokenManager TokenManager) *RecoveryManager {
 	return &RecoveryManager{
-		Client:   client,
-		Log:      log,
-		Recorder: recorder,
-		Scheme:   scheme,
+		Client:        client,
+		Log:           log,
+		Recorder:      recorder,
+		Scheme:        scheme,
+		secretManager: secretManager,
+		tokenManager:  tokenManager,
 	}
 }
 
@@ -62,6 +72,16 @@ func (r *RecoveryManager) RecoverSecrets(ctx context.Context, vtu *vaultv1alpha1
 		case "update":
 			if err := r.updateIncompleteSecret(ctx, vtu, action); err != nil {
 				r.Log.Error(err, "Failed to update secret", "secret", action.SecretName)
+				return err
+			}
+		case "restore":
+			// Handle replacing existing placeholder/incomplete admin tokens
+			if err := r.recoverMissingSecret(ctx, vtu, action, vaultClient); err != nil {
+				r.Log.Error(err, "Failed to restore secret", "secret", action.SecretName)
+				if r.Recorder != nil {
+					r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "SecretRestoreFailed",
+						"Failed to restore secret %s: %v", action.SecretName, err)
+				}
 				return err
 			}
 		}
@@ -145,9 +165,9 @@ func (r *RecoveryManager) recoverTransitToken(ctx context.Context, vtu *vaultv1a
 	return fmt.Errorf("transit token requires manual recovery - placeholder created")
 }
 
-// recoverAdminToken attempts to guide recovery of the admin token
+// recoverAdminToken attempts to recover the admin token
 func (r *RecoveryManager) recoverAdminToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, action RecoveryAction, vaultClient vault.Client) error {
-	r.Log.Info("Admin token is missing")
+	r.Log.Info("Admin token is missing, attempting recovery")
 
 	// Check if Vault is initialized and unsealed
 	status, err := vaultClient.CheckStatus(ctx)
@@ -160,16 +180,87 @@ func (r *RecoveryManager) recoverAdminToken(ctx context.Context, vtu *vaultv1alp
 			"Cannot recover admin token: vault is not initialized or is sealed")
 	}
 
-	// Check if we have recovery keys
-	_, err = r.getRecoveryKeys(ctx, vtu)
-	if err != nil {
-		r.Log.Error(err, "Cannot automatically recover admin token without recovery keys")
-		return r.createRecoveryPlaceholder(ctx, vtu, action,
-			"Admin token missing - manual recovery required using 'vault operator generate-root' with recovery keys")
+	// Step 1: Try to recover from transit vault backup if enabled
+	if vtu.Spec.Initialization.TokenRecovery.Enabled && vtu.Spec.Initialization.TokenRecovery.BackupToTransit {
+		r.Log.Info("Attempting to recover token from transit vault backup")
+		
+		token, err := r.recoverTokenFromTransit(ctx, vtu)
+		if err != nil {
+			r.Log.Error(err, "Failed to recover token from transit vault")
+		} else if token != "" {
+			// Successfully recovered token from backup
+			r.Log.Info("Successfully recovered admin token from transit vault backup")
+			
+			// Check if this is a root token and TokenManagement is enabled
+			if r.tokenManager != nil && vtu.Spec.TokenManagement != nil && vtu.Spec.TokenManagement.Enabled {
+				// Check if the recovered token is a root token
+				// We assume root tokens don't have a prefix like 'hvs.'
+				if !strings.HasPrefix(token, "hvs.") && !strings.HasPrefix(token, "s.") {
+					r.Log.Info("Recovered token appears to be root, creating scoped token")
+					scopedToken, err := r.tokenManager.CreateScopedTokenFromRoot(ctx, vtu, token)
+					if err != nil {
+						r.Log.Error(err, "Failed to create scoped token from recovered root token")
+						// Fall back to using the root token
+					} else {
+						r.Log.Info("Successfully created scoped token from recovered root token")
+						token = scopedToken
+					}
+				}
+			}
+			
+			return r.restoreAdminToken(ctx, vtu, action, token)
+		}
 	}
 
-	// We have recovery keys but automatic generation is not implemented
-	r.Log.Info("Automatic root token generation is not implemented",
+	// Step 2: Try automatic generation if enabled
+	if vtu.Spec.Initialization.TokenRecovery.AutoGenerate {
+		r.Log.Info("Attempting automatic token generation")
+		
+		// Check if we have recovery keys
+		recoveryKeys, err := r.getRecoveryKeys(ctx, vtu)
+		if err != nil {
+			r.Log.Error(err, "Cannot automatically generate token without recovery keys")
+		} else {
+			// Generate new root token using recovery keys
+			newToken, err := r.generateNewRootToken(ctx, vaultClient, recoveryKeys)
+			if err != nil {
+				r.Log.Error(err, "Failed to generate new root token")
+			} else {
+				r.Log.Info("Successfully generated new root token")
+				
+				// Create scoped admin token and revoke root
+				adminToken := newToken
+				if r.tokenManager != nil && vtu.Spec.TokenManagement != nil && vtu.Spec.TokenManagement.Enabled {
+					scopedToken, err := r.tokenManager.CreateScopedTokenFromRoot(ctx, vtu, newToken)
+					if err != nil {
+						r.Log.Error(err, "Failed to create scoped admin token, using root token")
+					} else {
+						r.Log.Info("Successfully created scoped admin token and revoked root token")
+						adminToken = scopedToken
+					}
+				} else {
+					r.Log.Info("Token management not enabled, using root token directly")
+				}
+				
+				// Restore the token
+				if err := r.restoreAdminToken(ctx, vtu, action, adminToken); err != nil {
+					return err
+				}
+				
+				// Backup the new token if enabled
+				if vtu.Spec.Initialization.TokenRecovery.BackupToTransit {
+					if err := r.backupTokenToTransit(ctx, vtu, adminToken); err != nil {
+						r.Log.Error(err, "Failed to backup new token to transit vault")
+					}
+				}
+				
+				return nil
+			}
+		}
+	}
+
+	// Step 3: Fall back to placeholder with instructions
+	r.Log.Info("Automatic recovery not possible, creating placeholder",
 		"action", "Use 'vault operator generate-root' manually with the recovery keys")
 
 	// Record an event with clear instructions
@@ -309,4 +400,207 @@ func GenerateSecureToken(length int) (string, error) {
 		return "", fmt.Errorf("generating random bytes: %w", err)
 	}
 	return base64.URLEncoding.EncodeToString(bytes), nil
+}
+
+// recoverTokenFromTransit attempts to recover admin token from transit vault backup
+func (r *RecoveryManager) recoverTokenFromTransit(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) (string, error) {
+	// Resolve transit vault address
+	resolver := transit.NewAddressResolver(r.Client, r.Log.WithName("transit-resolver"))
+	address, err := resolver.ResolveAddress(ctx, &vtu.Spec.TransitVault, vtu.Namespace)
+	if err != nil {
+		return "", fmt.Errorf("resolving transit vault address: %w", err)
+	}
+	
+	// Get transit vault token - from the VTU namespace
+	secretNamespace := vtu.Namespace
+	
+	transitToken, err := r.secretManager.Get(ctx,
+		secretNamespace,
+		vtu.Spec.TransitVault.SecretRef.Name,
+		vtu.Spec.TransitVault.SecretRef.Key)
+	if err != nil {
+		return "", fmt.Errorf("getting transit token: %w", err)
+	}
+
+	// Create KV client for transit vault
+	kvClient, err := transit.NewKVClient(
+		address,
+		string(transitToken),
+		r.Log.WithName("transit-kv"))
+	if err != nil {
+		return "", fmt.Errorf("creating transit KV client: %w", err)
+	}
+	
+	// Ensure KV v2 is enabled (will create if needed)
+	if err := kvClient.EnsureKVEnabled(ctx); err != nil {
+		// Log warning but don't fail recovery - reading might still work
+		r.Log.Error(err, "Failed to ensure KV v2 on transit vault during recovery")
+	}
+
+	// Build backup path
+	backupPath := transit.BuildTokenBackupPath(
+		vtu.Namespace,
+		vtu.Name,
+		vtu.Spec.Initialization.TokenRecovery.TransitKVPath)
+
+	// Read token from backup
+	token, err := kvClient.ReadToken(ctx, backupPath)
+	if err != nil {
+		return "", fmt.Errorf("reading token from transit KV: %w", err)
+	}
+
+	return token, nil
+}
+
+// restoreAdminToken restores the recovered admin token to Kubernetes secret
+func (r *RecoveryManager) restoreAdminToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, action RecoveryAction, token string) error {
+	// Check if the secret already exists
+	existingSecret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{
+		Namespace: action.Namespace,
+		Name:      action.SecretName,
+	}, existingSecret)
+	
+	secretExists := err == nil
+	
+	// If secret exists, delete it first
+	if secretExists {
+		r.Log.Info("Existing admin token secret found, deleting to replace",
+			"namespace", action.Namespace,
+			"name", action.SecretName)
+		
+		if err := r.Delete(ctx, existingSecret); err != nil {
+			return fmt.Errorf("deleting existing admin token secret: %w", err)
+		}
+		
+		// Wait a moment for deletion to propagate
+		time.Sleep(100 * time.Millisecond)
+	}
+	
+	// Create new secret with recovered token
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        action.SecretName,
+			Namespace:   action.Namespace,
+			Annotations: vtu.Spec.Initialization.SecretNames.AdminTokenAnnotations,
+		},
+		Data: map[string][]byte{"token": []byte(token)},
+	}
+	
+	// Add recovery annotation
+	if secret.Annotations == nil {
+		secret.Annotations = make(map[string]string)
+	}
+	secret.Annotations["vault.homelab.io/recovered"] = "true"
+	secret.Annotations["vault.homelab.io/recovery-time"] = time.Now().Format(time.RFC3339)
+	
+	// Only set controller reference if in the same namespace
+	if vtu.Namespace == secret.Namespace {
+		if err := controllerutil.SetControllerReference(vtu, secret, r.Scheme); err != nil {
+			return fmt.Errorf("setting controller reference: %w", err)
+		}
+	}
+
+	if err := r.Create(ctx, secret); err != nil {
+		return fmt.Errorf("creating admin token secret: %w", err)
+	}
+
+	if r.Recorder != nil {
+		action := "recovered"
+		if secretExists {
+			action = "replaced"
+		}
+		r.Recorder.Eventf(vtu, corev1.EventTypeNormal, "TokenRecovered",
+			"Admin token successfully %s", action)
+	}
+
+	return nil
+}
+
+// generateNewRootToken generates a new root token using recovery keys
+func (r *RecoveryManager) generateNewRootToken(ctx context.Context, vaultClient vault.Client, recoveryKeys []string) (string, error) {
+	r.Log.Info("Generating new root token using recovery keys")
+	
+	// Get the API client from the vault client interface
+	apiClient := vaultClient.GetAPIClient()
+	if apiClient == nil {
+		return "", fmt.Errorf("vault client does not support API access")
+	}
+	
+	// Use the vault package's root token generation
+	rootToken, err := vault.GenerateRootToken(ctx, apiClient, recoveryKeys)
+	if err != nil {
+		return "", fmt.Errorf("generating root token: %w", err)
+	}
+	
+	r.Log.Info("Successfully generated new root token")
+	return rootToken, nil
+}
+
+// createScopedAdminToken creates a scoped admin token from root token
+func (r *RecoveryManager) createScopedAdminToken(ctx context.Context, vaultClient vault.Client, rootToken string) (string, error) {
+	r.Log.Info("Creating scoped admin token from root token")
+	
+	// This is just a stub - the actual token creation needs to happen
+	// in the recoverAdminToken method where we have access to VTU
+	// The TokenManager requires VTU context that we don't have here
+	return rootToken, nil
+}
+
+// backupTokenToTransit backs up token to transit vault
+func (r *RecoveryManager) backupTokenToTransit(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, token string) error {
+	// Resolve transit vault address
+	resolver := transit.NewAddressResolver(r.Client, r.Log.WithName("transit-resolver"))
+	address, err := resolver.ResolveAddress(ctx, &vtu.Spec.TransitVault, vtu.Namespace)
+	if err != nil {
+		return fmt.Errorf("resolving transit vault address: %w", err)
+	}
+	
+	// Get transit vault token - from the VTU namespace
+	secretNamespace := vtu.Namespace
+	
+	transitToken, err := r.secretManager.Get(ctx,
+		secretNamespace,
+		vtu.Spec.TransitVault.SecretRef.Name,
+		vtu.Spec.TransitVault.SecretRef.Key)
+	if err != nil {
+		return fmt.Errorf("getting transit token: %w", err)
+	}
+
+	// Create KV client for transit vault
+	kvClient, err := transit.NewKVClient(
+		address,
+		string(transitToken),
+		r.Log.WithName("transit-kv"))
+	if err != nil {
+		return fmt.Errorf("creating transit KV client: %w", err)
+	}
+	
+	// Ensure KV v2 is enabled (will create if needed)
+	if err := kvClient.EnsureKVEnabled(ctx); err != nil {
+		return fmt.Errorf("ensuring KV v2 on transit vault: %w", err)
+	}
+
+	// Build backup path
+	backupPath := transit.BuildTokenBackupPath(
+		vtu.Namespace,
+		vtu.Name,
+		vtu.Spec.Initialization.TokenRecovery.TransitKVPath)
+
+	// Write token with metadata
+	metadata := transit.KVMetadata{
+		CreatedBy:  "vault-transit-unseal-operator",
+		Purpose:    "admin-token-backup-recovery",
+		BackupTime: time.Now().Format(time.RFC3339),
+		Labels: map[string]string{
+			"vault.homelab.io/instance":  vtu.Name,
+			"vault.homelab.io/namespace": vtu.Namespace,
+		},
+	}
+
+	if err := kvClient.WriteTokenWithMetadata(ctx, backupPath, token, metadata); err != nil {
+		return fmt.Errorf("writing token to transit KV: %w", err)
+	}
+
+	return nil
 }

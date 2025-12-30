@@ -347,12 +347,45 @@ func (r *VaultReconciler) InitializeVault(ctx context.Context, vaultClient vault
 func (r *VaultReconciler) StoreSecrets(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, initResp *vault.InitResponse) error {
 	namespace := vtu.Spec.VaultPod.Namespace
 
-	// Store admin token with annotations if provided
+	// Prepare annotations for admin token
+	annotations := make(map[string]string)
+	if vtu.Spec.Initialization.SecretNames.AdminTokenAnnotations != nil {
+		for k, v := range vtu.Spec.Initialization.SecretNames.AdminTokenAnnotations {
+			annotations[k] = v
+		}
+	}
+	
+	// If TokenManagement is enabled, mark this as a root token that needs replacement
+	if r.TokenManager != nil && vtu.Spec.TokenManagement != nil && vtu.Spec.TokenManagement.Enabled {
+		annotations["vault.homelab.io/root-token"] = "true"
+		annotations["vault.homelab.io/needs-replacement"] = "true"
+		r.Log.Info("Storing root token with replacement annotation")
+	}
+
+	// Store admin token with annotations
 	if err := r.SecretManager.CreateOrUpdateWithOptions(ctx, namespace,
 		vtu.Spec.Initialization.SecretNames.AdminToken,
 		map[string][]byte{"token": []byte(initResp.RootToken)},
-		vtu.Spec.Initialization.SecretNames.AdminTokenAnnotations); err != nil {
+		annotations); err != nil {
 		return fmt.Errorf("storing admin token: %w", err)
+	}
+	
+	// Backup token to transit vault if enabled
+	if vtu.Spec.Initialization.TokenRecovery.Enabled && vtu.Spec.Initialization.TokenRecovery.BackupToTransit {
+		if err := r.backupTokenToTransit(ctx, vtu, initResp.RootToken); err != nil {
+			// Log error but don't fail initialization
+			r.Log.Error(err, "Failed to backup token to transit vault")
+			if r.Recorder != nil {
+				r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "TokenBackupFailed",
+					"Failed to backup admin token to transit vault: %v", err)
+			}
+		} else {
+			r.Log.Info("Successfully backed up admin token to transit vault")
+			if r.Recorder != nil {
+				r.Recorder.Event(vtu, corev1.EventTypeNormal, "TokenBackupSuccess",
+					"Admin token backed up to transit vault for recovery")
+			}
+		}
 	}
 
 	// Store recovery keys only if enabled
@@ -513,12 +546,44 @@ func (r *VaultReconciler) GenerateRootToken(ctx context.Context, vaultClient vau
 	log := r.Log.WithValues("pod", pod.Name)
 	log.Info("Generating new root token for initialized Vault")
 
-	// For transit seal, we can't use the standard root token generation
-	// Instead, we'll create a new admin token using the existing unseal keys
-	// This is a simplified approach - in production you might want to use
-	// vault operator generate-root with recovery keys
+	// For forceReinitialize, we'll use the same recovery flow
+	// This ensures consistent behavior whether recovering from missing token or forcing new token
+	
+	// First try to use recovery manager if available
+	if r.SecretVerifier != nil && vtu.Spec.Initialization.TokenRecovery.Enabled {
+		// Create a fake verification result showing admin token is missing
+		result := &secrets.VerificationResult{
+			AllPresent: false,
+			Missing: []secrets.MissingSecret{
+				{
+					Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
+					Namespace: vtu.Spec.VaultPod.Namespace,
+				},
+			},
+			RecoveryPlan: []secrets.RecoveryAction{
+				{
+					Type:       "create",
+					SecretName: vtu.Spec.Initialization.SecretNames.AdminToken,
+					Namespace:  vtu.Spec.VaultPod.Namespace,
+				},
+			},
+		}
+		
+		// Use recovery manager to handle token generation
+		if r.RecoveryManager != nil {
+			if err := r.RecoveryManager.RecoverSecrets(ctx, vtu, result, vaultClient); err != nil {
+				log.Error(err, "Failed to recover admin token using recovery manager")
+			} else {
+				// Success - clear the force reinitialize flag and return
+				if err := r.clearForceReinitializeFlag(ctx, vtu); err != nil {
+					log.Error(err, "Failed to clear ForceReinitialize flag")
+				}
+				return nil
+			}
+		}
+	}
 
-	// First, check if we have recovery keys
+	// Fallback to existing behavior if recovery not available
 	recoveryKeys, err := r.getRecoveryKeys(ctx, vtu)
 	if err != nil {
 		// No recovery keys available, create a placeholder token
@@ -619,5 +684,63 @@ func (r *VaultReconciler) clearForceReinitializeFlag(ctx context.Context, vtu *v
 	}
 
 	r.Log.Info("Cleared ForceReinitialize flag")
+	return nil
+}
+
+// backupTokenToTransit backs up the admin token to transit vault KV
+func (r *VaultReconciler) backupTokenToTransit(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, token string) error {
+	// Resolve transit vault address
+	resolver := transit.NewAddressResolver(r.Client, r.Log.WithName("transit-resolver"))
+	address, err := resolver.ResolveAddress(ctx, &vtu.Spec.TransitVault, vtu.Namespace)
+	if err != nil {
+		return fmt.Errorf("resolving transit vault address: %w", err)
+	}
+	
+	// Get transit vault token - from the VTU namespace
+	secretNamespace := vtu.Namespace
+	
+	transitToken, err := r.SecretManager.Get(ctx, 
+		secretNamespace, 
+		vtu.Spec.TransitVault.SecretRef.Name,
+		vtu.Spec.TransitVault.SecretRef.Key)
+	if err != nil {
+		return fmt.Errorf("getting transit token: %w", err)
+	}
+	
+	// Create KV client for transit vault
+	kvClient, err := transit.NewKVClient(
+		address,
+		string(transitToken),
+		r.Log.WithName("transit-kv"))
+	if err != nil {
+		return fmt.Errorf("creating transit KV client: %w", err)
+	}
+	
+	// Ensure KV v2 is enabled (will create if needed)
+	if err := kvClient.EnsureKVEnabled(ctx); err != nil {
+		return fmt.Errorf("ensuring KV v2 on transit vault: %w", err)
+	}
+	
+	// Build backup path
+	backupPath := transit.BuildTokenBackupPath(
+		vtu.Namespace,
+		vtu.Name,
+		vtu.Spec.Initialization.TokenRecovery.TransitKVPath)
+	
+	// Write token with metadata
+	metadata := transit.KVMetadata{
+		CreatedBy:  "vault-transit-unseal-operator",
+		Purpose:    "admin-token-backup",
+		BackupTime: time.Now().Format(time.RFC3339),
+		Labels: map[string]string{
+			"vault.homelab.io/instance": vtu.Name,
+			"vault.homelab.io/namespace": vtu.Namespace,
+		},
+	}
+	
+	if err := kvClient.WriteTokenWithMetadata(ctx, backupPath, token, metadata); err != nil {
+		return fmt.Errorf("writing token to transit KV: %w", err)
+	}
+	
 	return nil
 }

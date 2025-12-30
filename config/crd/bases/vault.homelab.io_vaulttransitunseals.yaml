@@ -119,6 +119,29 @@ spec:
                           Set to false for production environments where recovery keys should be handled outside of Kubernetes
                         type: boolean
                     type: object
+                  tokenRecovery:
+                    description: Token recovery configuration for disaster recovery
+                      scenarios
+                    properties:
+                      autoGenerate:
+                        default: true
+                        description: Automatically generate new admin token if missing
+                          during recovery
+                        type: boolean
+                      backupToTransit:
+                        default: true
+                        description: Backup admin tokens to transit vault KV for recovery
+                        type: boolean
+                      enabled:
+                        default: true
+                        description: Enable token recovery features
+                        type: boolean
+                      transitKVPath:
+                        description: |-
+                          KV path in transit vault for token backup
+                          Defaults to vault-transit-unseal/<namespace>/<name>/admin-token
+                        type: string
+                    type: object
                 type: object
               monitoring:
                 description: Monitoring parameters

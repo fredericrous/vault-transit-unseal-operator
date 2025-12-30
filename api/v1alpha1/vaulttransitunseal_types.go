@@ -122,6 +122,29 @@ type InitializationSpec struct {
 	// This is useful when the admin token is lost but Vault is already initialized
 	// +kubebuilder:default=false
 	ForceReinitialize bool `json:"forceReinitialize,omitempty"`
+
+	// Token recovery configuration for disaster recovery scenarios
+	TokenRecovery TokenRecoverySpec `json:"tokenRecovery,omitempty"`
+}
+
+// TokenRecoverySpec defines token recovery configuration for disaster recovery
+type TokenRecoverySpec struct {
+	// Enable token recovery features
+	// +kubebuilder:default=true
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Backup admin tokens to transit vault KV for recovery
+	// +kubebuilder:default=true
+	BackupToTransit bool `json:"backupToTransit,omitempty"`
+
+	// KV path in transit vault for token backup
+	// Defaults to vault-transit-unseal/<namespace>/<name>/admin-token
+	// +optional
+	TransitKVPath string `json:"transitKVPath,omitempty"`
+
+	// Automatically generate new admin token if missing during recovery
+	// +kubebuilder:default=true
+	AutoGenerate bool `json:"autoGenerate,omitempty"`
 }
 
 // SecretNamesSpec defines secret names

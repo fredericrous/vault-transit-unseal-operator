@@ -9,6 +9,8 @@
 - 🔐 **Security First** - Recovery keys only in logs, never stored by default
 - ⚡ **Post-Unseal Setup** - Auto-configures KV engine and External Secrets Operator
 - 🔄 **Integration Ready** - Works with Reflector and Reloader out of the box
+- 🔑 **Automatic Token Recovery** - Backs up and recovers admin tokens for disaster recovery (v1.6.0+)
+- 🚨 **Self-Healing** - Automatically generates new tokens when missing using recovery keys
 
 ## Prerequisites
 
@@ -77,6 +79,12 @@ spec:
     address: http://transit-vault:8200
     secretRef:
       name: vault-transit-token
+  initialization:
+    # Token recovery configuration (v1.6.0+)
+    tokenRecovery:
+      enabled: true         # Enable automatic recovery
+      backupToTransit: true # Backup tokens to transit vault
+      autoGenerate: true    # Generate new tokens if backup missing
   postUnsealConfig:
     enableKV: true
     enableExternalSecretsOperator: true
@@ -213,6 +221,11 @@ spec:
   initialization:
     recoveryShares: 5
     recoveryThreshold: 3
+    # Token recovery configuration (v1.6.0+)
+    tokenRecovery:
+      enabled: true         # Enable automatic recovery
+      backupToTransit: true # Backup tokens to transit vault
+      autoGenerate: true    # Generate new tokens if backup missing
     secretNames:
       storeRecoveryKeys: false  # Production: keys only in logs
       adminTokenAnnotations:

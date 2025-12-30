@@ -50,15 +50,21 @@ func (m *SimpleManager) ReconcileInitialToken(ctx context.Context, vtu *vaultv1a
 	}
 
 	// Check if initial token already exists
-	exists, err := m.tokenExists(ctx, vtu)
+	exists, needsReplacement, err := m.checkTokenStatus(ctx, vtu)
 	if err != nil {
 		return err
 	}
 
-	if exists {
-		// Token already exists - Kyverno will handle lifecycle
+	if exists && !needsReplacement {
+		// Token already exists and doesn't need replacement - Kyverno will handle lifecycle
 		m.Log.V(1).Info("Admin token already exists, lifecycle managed by Kyverno")
 		return nil
+	}
+	
+	// If token needs replacement (root token stored during init), create scoped token
+	if needsReplacement {
+		m.Log.Info("Root token found, creating scoped replacement")
+		return m.replaceRootToken(ctx, vtu, vaultClient)
 	}
 
 	// Check dependencies before creating
@@ -237,7 +243,10 @@ func (m *SimpleManager) tokenExists(ctx context.Context, vtu *vaultv1alpha1.Vaul
 }
 
 func (m *SimpleManager) ensurePolicy(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, vaultClient *vaultapi.Client) error {
-	policyName := vtu.Spec.TokenManagement.PolicyName
+	policyName := "vault-admin" // Default policy name
+	if vtu.Spec.TokenManagement != nil && vtu.Spec.TokenManagement.PolicyName != "" {
+		policyName = vtu.Spec.TokenManagement.PolicyName
+	}
 
 	// Default vault-admin policy
 	policy := `
@@ -306,4 +315,190 @@ func (m *SimpleManager) checkDependencies(ctx context.Context, vtu *vaultv1alpha
 	}
 
 	return true, nil
+}
+
+// CreateScopedTokenFromRoot creates a scoped admin token from a root token and revokes the root token
+func (m *SimpleManager) CreateScopedTokenFromRoot(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, rootToken string) (string, error) {
+	m.Log.Info("Creating scoped admin token from root token")
+	
+	// Check if TokenManagement is configured and enabled
+	if vtu.Spec.TokenManagement == nil || !vtu.Spec.TokenManagement.Enabled {
+		m.Log.Info("TokenManagement not enabled, returning root token")
+		return rootToken, nil
+	}
+
+	// Create a Vault client with the root token
+	config := vaultapi.DefaultConfig()
+	vaultClient, err := vaultapi.NewClient(config)
+	if err != nil {
+		return "", fmt.Errorf("creating vault client: %w", err)
+	}
+	vaultClient.SetToken(rootToken)
+
+	// Get vault pod to determine address
+	pods := &corev1.PodList{}
+	labels := make(map[string]string)
+	if vtu.Spec.VaultPod.Selector != nil {
+		for k, v := range vtu.Spec.VaultPod.Selector {
+			labels[k] = v
+		}
+	}
+	if err := m.List(ctx, pods, client.InNamespace(vtu.Spec.VaultPod.Namespace), client.MatchingLabels(labels)); err != nil {
+		return "", fmt.Errorf("listing vault pods: %w", err)
+	}
+	
+	if len(pods.Items) == 0 {
+		return "", fmt.Errorf("no vault pods found")
+	}
+	
+	pod := &pods.Items[0]
+	vaultClient.SetAddress(fmt.Sprintf("http://%s:8200", pod.Status.PodIP))
+
+	// Ensure policy exists first
+	if err := m.ensurePolicy(ctx, vtu, vaultClient); err != nil {
+		return "", fmt.Errorf("failed to ensure policy: %w", err)
+	}
+
+	// Create the scoped token with defaults if needed
+	ttl := 24 * time.Hour // Default TTL
+	if vtu.Spec.TokenManagement.TTL != "" {
+		if parsedTTL, err := time.ParseDuration(vtu.Spec.TokenManagement.TTL); err == nil {
+			ttl = parsedTTL
+		}
+	}
+	
+	policyName := "vault-admin" // Default policy
+	if vtu.Spec.TokenManagement.PolicyName != "" {
+		policyName = vtu.Spec.TokenManagement.PolicyName
+	}
+	
+	renewable := true // Default to renewable
+	tokenReq := &vaultapi.TokenCreateRequest{
+		Policies:  []string{policyName},
+		TTL:       ttl.String(),
+		Renewable: &renewable,
+		Metadata: map[string]string{
+			"created_by": "vault-transit-unseal-operator",
+			"purpose":    "admin-token-recovery",
+			"vtu":        fmt.Sprintf("%s/%s", vtu.Namespace, vtu.Name),
+			"source":     "root-token-recovery",
+		},
+	}
+
+	resp, err := vaultClient.Auth().Token().Create(tokenReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to create scoped token: %w", err)
+	}
+
+	newToken := resp.Auth.ClientToken
+
+	// Revoke the root token now that we have the scoped token
+	if err := vaultClient.Auth().Token().RevokeSelf(rootToken); err != nil {
+		// Log the error but don't fail - we have the new token
+		m.Log.Error(err, "Failed to revoke root token after creating scoped token")
+	} else {
+		m.Log.Info("Successfully revoked root token after creating scoped token")
+	}
+
+	m.Log.Info("Successfully created scoped admin token",
+		"accessor", resp.Auth.Accessor,
+		"ttl", ttl,
+		"policy", policyName)
+
+	return newToken, nil
+}
+
+// checkTokenStatus checks if the admin token exists and if it needs replacement
+func (m *SimpleManager) checkTokenStatus(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) (exists bool, needsReplacement bool, err error) {
+	secret := &corev1.Secret{}
+	err = m.Get(ctx, client.ObjectKey{
+		Namespace: vtu.Spec.VaultPod.Namespace,
+		Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
+	}, secret)
+	
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	
+	// Token exists
+	exists = true
+	
+	// Check if it needs replacement
+	if secret.Annotations != nil {
+		if rootToken, ok := secret.Annotations["vault.homelab.io/root-token"]; ok && rootToken == "true" {
+			needsReplacement = true
+		}
+		if needsRepl, ok := secret.Annotations["vault.homelab.io/needs-replacement"]; ok && needsRepl == "true" {
+			needsReplacement = true
+		}
+	}
+	
+	return exists, needsReplacement, nil
+}
+
+// replaceRootToken replaces a root token with a scoped admin token
+func (m *SimpleManager) replaceRootToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, vaultClient *vaultapi.Client) error {
+	// Get the existing root token
+	secret := &corev1.Secret{}
+	err := m.Get(ctx, client.ObjectKey{
+		Namespace: vtu.Spec.VaultPod.Namespace,
+		Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
+	}, secret)
+	
+	if err != nil {
+		return fmt.Errorf("failed to get admin token secret: %w", err)
+	}
+	
+	rootToken := string(secret.Data["token"])
+	if rootToken == "" {
+		return fmt.Errorf("admin token secret has empty token")
+	}
+	
+	// Create scoped token from root
+	scopedToken, err := m.CreateScopedTokenFromRoot(ctx, vtu, rootToken)
+	if err != nil {
+		return fmt.Errorf("failed to create scoped token: %w", err)
+	}
+	
+	// Update the secret with the scoped token
+	secret.Data["token"] = []byte(scopedToken)
+	
+	// Update annotations
+	if secret.Annotations == nil {
+		secret.Annotations = make(map[string]string)
+	}
+	delete(secret.Annotations, "vault.homelab.io/root-token")
+	delete(secret.Annotations, "vault.homelab.io/needs-replacement")
+	secret.Annotations["vault.homelab.io/scoped-token"] = "true"
+	secret.Annotations["vault.homelab.io/replaced-at"] = time.Now().Format(time.RFC3339)
+	
+	// Add lifecycle annotations for Kyverno
+	secret.Annotations["vault.homelab.io/token-created"] = time.Now().Format(time.RFC3339)
+	secret.Annotations["vault.homelab.io/token-ttl"] = vtu.Spec.TokenManagement.TTL
+	secret.Annotations["vault.homelab.io/token-policies"] = vtu.Spec.TokenManagement.PolicyName
+	
+	if vtu.Spec.TokenManagement.AutoRenew {
+		secret.Annotations["vault.homelab.io/auto-renew"] = "true"
+	}
+	
+	if vtu.Spec.TokenManagement.AutoRotate {
+		secret.Annotations["vault.homelab.io/auto-rotate"] = "true"
+		secret.Annotations["vault.homelab.io/rotation-period"] = vtu.Spec.TokenManagement.RotationPeriod
+	}
+	
+	// Update the secret
+	if err := m.Update(ctx, secret); err != nil {
+		return fmt.Errorf("failed to update admin token secret: %w", err)
+	}
+	
+	m.Log.Info("Successfully replaced root token with scoped token")
+	
+	// Update status
+	vtu.Status.TokenStatus.State = vaultv1alpha1.TokenStateActive
+	vtu.Status.TokenStatus.LastRenewedAt = time.Now().Format(time.RFC3339)
+	
+	return nil
 }

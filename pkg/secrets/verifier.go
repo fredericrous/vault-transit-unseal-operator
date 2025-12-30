@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -113,6 +114,33 @@ func (v *Verifier) VerifyExpectedSecrets(ctx context.Context, vtu *vaultv1alpha1
 		for _, key := range exp.Keys {
 			if _, exists := secret.Data[key]; !exists {
 				missingKeys = append(missingKeys, key)
+			}
+		}
+
+		// Special handling for admin token - check if it's a placeholder or incomplete
+		if exp.Name == vtu.Spec.Initialization.SecretNames.AdminToken && !vtu.Spec.Initialization.SecretNames.SkipAdminTokenCreation {
+			tokenData, hasToken := secret.Data["token"]
+			if hasToken && !v.isUsableToken(secret, string(tokenData)) {
+				v.Log.Info("Admin token is not usable (placeholder or incomplete)",
+					"namespace", exp.Namespace,
+					"name", exp.Name)
+				
+				// Treat as missing for recovery purposes
+				result.AllPresent = false
+				result.Missing = append(result.Missing, MissingSecret{
+					Name:      exp.Name,
+					Namespace: exp.Namespace,
+					Optional:  false,
+				})
+
+				// Add recovery action
+				result.RecoveryPlan = append(result.RecoveryPlan, RecoveryAction{
+					Type:        "restore",
+					SecretName:  exp.Name,
+					Namespace:   exp.Namespace,
+					Description: fmt.Sprintf("Restore admin token for %s/%s (current token is placeholder or incomplete)", exp.Namespace, exp.Name),
+				})
+				continue
 			}
 		}
 
@@ -243,4 +271,34 @@ func (v *Verifier) LogMissingSecrets(result *VerificationResult) {
 	}
 
 	v.Log.Info("=================================")
+}
+
+// isUsableToken checks if a token is usable (not a placeholder or incomplete)
+func (v *Verifier) isUsableToken(secret *corev1.Secret, token string) bool {
+	// Check annotations
+	if secret.Annotations != nil {
+		if _, hasRecoveryRequired := secret.Annotations["vault.homelab.io/recovery-required"]; hasRecoveryRequired {
+			return false
+		}
+		if _, hasIncomplete := secret.Annotations["vault.homelab.io/incomplete"]; hasIncomplete {
+			return false
+		}
+		if rootToken, hasRootToken := secret.Annotations["vault.homelab.io/root-token"]; hasRootToken && rootToken == "true" {
+			// Root tokens should be replaced with scoped tokens
+			return false
+		}
+	}
+
+	// Check for common placeholder patterns
+	if strings.HasPrefix(token, "placeholder-") ||
+		strings.HasPrefix(token, "temp-") ||
+		strings.HasPrefix(token, "incomplete-") ||
+		token == "" ||
+		token == "null" ||
+		token == "undefined" ||
+		len(token) < 10 { // Vault tokens are typically much longer
+		return false
+	}
+
+	return true
 }
