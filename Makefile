@@ -1,5 +1,5 @@
-# Version from VERSION file
-VERSION ?= $(shell cat VERSION)
+# Version from git tags (with fallback to "dev" if no tags exist)
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
 # Image URL to use all building/pushing image targets
 IMG ?= ghcr.io/fredericrous/vault-transit-unseal-operator:$(VERSION)

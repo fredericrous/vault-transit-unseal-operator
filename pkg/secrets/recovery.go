@@ -453,6 +453,62 @@ func (r *RecoveryManager) recoverTokenFromTransit(ctx context.Context, vtu *vaul
 	return token, nil
 }
 
+// cleanupMixedStateSecret handles secrets that have both valid data and placeholder/incomplete markers
+func (r *RecoveryManager) cleanupMixedStateSecret(ctx context.Context, secret *corev1.Secret) error {
+	r.Log.Info("Cleaning up mixed-state secret",
+		"namespace", secret.Namespace,
+		"name", secret.Name)
+
+	updated := false
+
+	// Remove placeholder data if a valid token exists
+	if tokenData, hasToken := secret.Data["token"]; hasToken && len(tokenData) > 0 {
+		// Only remove placeholder if the token is not itself a placeholder
+		tokenStr := string(tokenData)
+		if !strings.HasPrefix(tokenStr, "placeholder-") &&
+			!strings.HasPrefix(tokenStr, "RECOVERY-REQUIRED:") &&
+			len(tokenStr) > 10 {
+			if _, hasPlaceholder := secret.Data["placeholder"]; hasPlaceholder {
+				delete(secret.Data, "placeholder")
+				updated = true
+				r.Log.Info("Removed placeholder data from secret with valid token")
+			}
+		}
+	}
+
+	// Clean up incorrect annotations if the token is valid
+	if secret.Annotations != nil {
+		// Remove incomplete markers if we have valid token data
+		if tokenData, hasToken := secret.Data["token"]; hasToken && len(tokenData) > 0 &&
+			!strings.HasPrefix(string(tokenData), "placeholder-") &&
+			!strings.HasPrefix(string(tokenData), "RECOVERY-REQUIRED:") {
+
+			if _, hasIncomplete := secret.Annotations["vault.homelab.io/incomplete"]; hasIncomplete {
+				delete(secret.Annotations, "vault.homelab.io/incomplete")
+				delete(secret.Annotations, "vault.homelab.io/incomplete-reason")
+				delete(secret.Annotations, "vault.homelab.io/incomplete-time")
+				updated = true
+				r.Log.Info("Removed incomplete annotations from secret with valid token")
+			}
+
+			if _, hasRecoveryRequired := secret.Annotations["vault.homelab.io/recovery-required"]; hasRecoveryRequired {
+				delete(secret.Annotations, "vault.homelab.io/recovery-required")
+				updated = true
+				r.Log.Info("Removed recovery-required annotation from secret with valid token")
+			}
+		}
+	}
+
+	if updated {
+		if err := r.Update(ctx, secret); err != nil {
+			return fmt.Errorf("updating cleaned secret: %w", err)
+		}
+		r.Log.Info("Successfully cleaned up mixed-state secret")
+	}
+
+	return nil
+}
+
 // restoreAdminToken restores the recovered admin token to Kubernetes secret
 func (r *RecoveryManager) restoreAdminToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, action RecoveryAction, token string) error {
 	// Check if the secret already exists
@@ -464,8 +520,25 @@ func (r *RecoveryManager) restoreAdminToken(ctx context.Context, vtu *vaultv1alp
 
 	secretExists := err == nil
 
-	// If secret exists, delete it first
+	// If secret exists, try to clean it up first
 	if secretExists {
+		// Check if it's a mixed-state secret that can be cleaned
+		if tokenData, hasToken := existingSecret.Data["token"]; hasToken && len(tokenData) > 0 {
+			// Decode and check if the existing token is valid
+			existingToken := string(tokenData)
+			if !strings.HasPrefix(existingToken, "placeholder-") &&
+				!strings.HasPrefix(existingToken, "RECOVERY-REQUIRED:") &&
+				len(existingToken) > 10 {
+				// Existing token looks valid, just clean up the secret
+				if err := r.cleanupMixedStateSecret(ctx, existingSecret); err != nil {
+					r.Log.Error(err, "Failed to cleanup mixed-state secret")
+				}
+				r.Log.Info("Existing secret has valid token, skipping replacement")
+				return nil
+			}
+		}
+
+		// Otherwise, delete and replace
 		r.Log.Info("Existing admin token secret found, deleting to replace",
 			"namespace", action.Namespace,
 			"name", action.SecretName)

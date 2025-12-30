@@ -293,11 +293,21 @@ func (v *Verifier) isUsableToken(secret *corev1.Secret, token string) bool {
 	if strings.HasPrefix(token, "placeholder-") ||
 		strings.HasPrefix(token, "temp-") ||
 		strings.HasPrefix(token, "incomplete-") ||
+		strings.HasPrefix(token, "RECOVERY-REQUIRED:") ||
 		token == "" ||
 		token == "null" ||
 		token == "undefined" ||
 		len(token) < 10 { // Vault tokens are typically much longer
 		return false
+	}
+
+	// If secret has both placeholder and token data, it needs cleanup but token might be valid
+	if _, hasPlaceholder := secret.Data["placeholder"]; hasPlaceholder {
+		v.Log.Info("Secret has mixed state (both token and placeholder data)",
+			"namespace", secret.Namespace,
+			"name", secret.Name)
+		// Token might still be valid, so don't mark as unusable
+		// The recovery process will clean this up
 	}
 
 	return true
