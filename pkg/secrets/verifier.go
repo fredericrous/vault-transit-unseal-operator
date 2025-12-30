@@ -124,7 +124,7 @@ func (v *Verifier) VerifyExpectedSecrets(ctx context.Context, vtu *vaultv1alpha1
 				v.Log.Info("Admin token is not usable (placeholder or incomplete)",
 					"namespace", exp.Namespace,
 					"name", exp.Name)
-				
+
 				// Treat as missing for recovery purposes
 				result.AllPresent = false
 				result.Missing = append(result.Missing, MissingSecret{

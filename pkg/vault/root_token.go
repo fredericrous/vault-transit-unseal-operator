@@ -43,7 +43,7 @@ func GenerateRootToken(ctx context.Context, client *vaultapi.Client, recoveryKey
 		if err := client.Sys().GenerateRootCancel(); err != nil {
 			return "", fmt.Errorf("canceling existing root generation: %w", err)
 		}
-		
+
 		// Reinitialize
 		initResp, err = client.Sys().GenerateRootInit(otp, "")
 		if err != nil {
@@ -97,7 +97,7 @@ func GenerateRootToken(ctx context.Context, client *vaultapi.Client, recoveryKey
 		return "", fmt.Errorf("creating test client: %w", err)
 	}
 	testClient.SetToken(rootToken)
-	
+
 	tokenInfo, err := testClient.Auth().Token().LookupSelf()
 	if err != nil {
 		return "", fmt.Errorf("verifying generated root token: %w", err)
@@ -135,7 +135,7 @@ func generateOTP() (string, error) {
 	if _, err := rand.Read(bytes); err != nil {
 		return "", fmt.Errorf("generating random bytes: %w", err)
 	}
-	
+
 	// Encode as base64 for the OTP
 	return base64.RawStdEncoding.EncodeToString(bytes), nil
 }

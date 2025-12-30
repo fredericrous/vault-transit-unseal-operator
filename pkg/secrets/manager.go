@@ -51,11 +51,11 @@ func (m *DefaultManager) CreateOrUpdateWithOptions(ctx context.Context, namespac
 	secret.Name = name
 	secret.Type = corev1.SecretTypeOpaque
 	secret.Data = data
-	
+
 	if secret.Annotations == nil {
 		secret.Annotations = make(map[string]string)
 	}
-	
+
 	for k, v := range annotations {
 		secret.Annotations[k] = v
 	}
@@ -63,7 +63,7 @@ func (m *DefaultManager) CreateOrUpdateWithOptions(ctx context.Context, namespac
 	if apierrors.IsNotFound(err) {
 		return m.Client.Create(ctx, secret)
 	}
-	
+
 	return m.Client.Update(ctx, secret)
 }
 
@@ -74,15 +74,15 @@ func (m *DefaultManager) Get(ctx context.Context, namespace, name, key string) (
 		Namespace: namespace,
 		Name:      name,
 	}, secret)
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	value, ok := secret.Data[key]
 	if !ok {
 		return nil, apierrors.NewNotFound(corev1.Resource("secret"), name)
 	}
-	
+
 	return value, nil
 }

@@ -84,7 +84,7 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 
 	// Create simplified token manager for hybrid approach
 	tokenManager := token.NewSimpleManager(r.Client, r.Log.WithName("token-manager"), r.Scheme)
-	
+
 	// Create recovery manager
 	recoveryManager := secrets.NewRecoveryManager(r.Client, r.Log.WithName("recovery-manager"), r.Recorder, r.Scheme, secretMgr, tokenManager)
 
