@@ -44,12 +44,23 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
 
+      - name: Checkout operator repository
+        uses: actions/checkout@v4
+        with:
+          path: operator
+
       - name: Checkout charts repository
         uses: actions/checkout@v4
         with:
           repository: fredericrous/charts
           token: ${{ secrets.CHARTS_REPO_TOKEN }}
           path: charts
+
+      - name: Sync CRD from operator
+        run: |
+          echo "Syncing CRD from operator to chart..."
+          cp -v operator/config/crd/bases/vault.homelab.io_vaulttransitunseals.yaml \
+               charts/charts/vault-transit-unseal-operator/crds/vault-transit-unseal-crd.yaml
 
       - name: Update Chart.yaml
         id: update-chart
@@ -179,6 +190,7 @@ jobs:
             
             ### Files Updated
             - `charts/vault-transit-unseal-operator/Chart.yaml` - Updated appVersion and chart version
+            - `charts/vault-transit-unseal-operator/crds/vault-transit-unseal-crd.yaml` - Synced CRD from operator
             - `README.md` - Updated chart version and app version in charts table
             
             ### What's Changed
