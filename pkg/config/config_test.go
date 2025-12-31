@@ -16,7 +16,7 @@ func TestNewDefaultConfig(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, cfg.ReconcileTimeout)
 	assert.Equal(t, 3, cfg.MaxConcurrentReconciles)
 	assert.Equal(t, "vault", cfg.Namespace)
-	assert.Equal(t, 30*time.Second, cfg.DefaultVaultTimeout)
+	assert.Equal(t, 120*time.Second, cfg.DefaultVaultTimeout)
 	assert.True(t, cfg.EnableTLSValidation)
 	assert.Equal(t, ":8080", cfg.MetricsAddr)
 	assert.Equal(t, ":8081", cfg.ProbeAddr)

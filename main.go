@@ -56,7 +56,7 @@ func main() {
 		skipCRDInstall = flag.Bool("skip-crd-install", false, "Skip CRD installation")
 
 		// Vault settings
-		vaultTimeout        = flag.Duration("vault-timeout", 30*time.Second, "Timeout for Vault API operations")
+		vaultTimeout        = flag.Duration("vault-timeout", 120*time.Second, "Timeout for Vault API operations")
 		enableTLSValidation = flag.Bool("vault-tls-validation", true, "Enable TLS certificate validation for Vault")
 
 		// Logging

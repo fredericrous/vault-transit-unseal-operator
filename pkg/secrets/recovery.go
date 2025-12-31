@@ -221,6 +221,11 @@ func (r *RecoveryManager) recoverAdminToken(ctx context.Context, vtu *vaultv1alp
 		recoveryKeys, err := r.getRecoveryKeys(ctx, vtu)
 		if err != nil {
 			r.Log.Error(err, "Cannot automatically generate token without recovery keys")
+			// If recovery keys are placeholders, create a more informative placeholder token
+			if strings.Contains(err.Error(), "placeholder") {
+				return r.createRecoveryPlaceholder(ctx, vtu, action,
+					"Recovery keys are placeholders - Vault needs re-initialization or manual recovery")
+			}
 		} else {
 			// Generate new root token using recovery keys
 			newToken, err := r.generateNewRootToken(ctx, vaultClient, recoveryKeys)
@@ -380,15 +385,40 @@ func (r *RecoveryManager) getRecoveryKeys(ctx context.Context, vtu *vaultv1alpha
 	}
 
 	var keys []string
+	var placeholderCount int
+	var validKeyCount int
+
 	for i := 0; i < vtu.Spec.Initialization.RecoveryShares; i++ {
 		key := fmt.Sprintf("recovery-key-%d", i)
 		if data, exists := secret.Data[key]; exists {
-			keys = append(keys, string(data))
+			keyStr := string(data)
+			// Check if this is a placeholder key
+			if strings.Contains(keyStr, "placeholder") || strings.Contains(keyStr, "PLACEHOLDER") ||
+				strings.Contains(keyStr, "RECOVERY-REQUIRED") {
+				placeholderCount++
+				r.Log.Info("Found placeholder recovery key", "key", key)
+				continue
+			}
+			keys = append(keys, keyStr)
+			validKeyCount++
 		}
 	}
 
-	if len(keys) < vtu.Spec.Initialization.RecoveryThreshold {
-		return nil, fmt.Errorf("insufficient recovery keys: have %d, need %d", len(keys), vtu.Spec.Initialization.RecoveryThreshold)
+	// Check if we have enough valid keys for recovery threshold
+	if validKeyCount < vtu.Spec.Initialization.RecoveryThreshold {
+		if placeholderCount > 0 {
+			return nil, fmt.Errorf("insufficient valid recovery keys: have %d valid + %d placeholders, need %d",
+				validKeyCount, placeholderCount, vtu.Spec.Initialization.RecoveryThreshold)
+		}
+		return nil, fmt.Errorf("insufficient recovery keys: have %d, need %d", validKeyCount, vtu.Spec.Initialization.RecoveryThreshold)
+	}
+
+	// Log warning about placeholders but proceed if we have enough valid keys
+	if placeholderCount > 0 {
+		r.Log.Info("Recovery keys contain placeholders but enough valid keys exist",
+			"validKeys", validKeyCount,
+			"placeholders", placeholderCount,
+			"threshold", vtu.Spec.Initialization.RecoveryThreshold)
 	}
 
 	return keys, nil

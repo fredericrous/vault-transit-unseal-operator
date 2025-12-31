@@ -37,7 +37,7 @@ func NewDefaultConfig() *OperatorConfig {
 		ReconcileTimeout:        5 * time.Minute,
 		MaxConcurrentReconciles: 3,
 		Namespace:               "vault",
-		DefaultVaultTimeout:     30 * time.Second,
+		DefaultVaultTimeout:     120 * time.Second,
 		EnableTLSValidation:     true,
 		MetricsAddr:             ":8080",
 		ProbeAddr:               ":8081",
