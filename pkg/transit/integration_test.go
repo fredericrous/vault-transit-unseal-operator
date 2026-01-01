@@ -50,6 +50,7 @@ var _ = Describe("Transit Client Integration Tests", func() {
 			"k8s-vault-unseal",
 			"transit",
 			false, // tlsSkipVerify
+			"",
 			testr.NewWithOptions(&testing.T{}, testr.Options{}),
 		)
 		Expect(err).NotTo(HaveOccurred())
@@ -269,6 +270,7 @@ var _ = Describe("Transit Client Integration Tests", func() {
 				"test-key",
 				"transit",
 				false,
+				"",
 				testr.NewWithOptions(&testing.T{}, testr.Options{}),
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -288,6 +290,7 @@ var _ = Describe("Transit Client Integration Tests", func() {
 				"non-existent-key",
 				"transit",
 				false,
+				"",
 				testr.NewWithOptions(&testing.T{}, testr.Options{}),
 			)
 			Expect(err).NotTo(HaveOccurred())

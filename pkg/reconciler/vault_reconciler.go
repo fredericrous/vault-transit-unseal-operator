@@ -25,15 +25,16 @@ import (
 // VaultReconciler handles the main reconciliation logic
 type VaultReconciler struct {
 	client.Client
-	Log             logr.Logger
-	Recorder        record.EventRecorder
-	VaultFactory    VaultClientFactory
-	SecretManager   SecretManager
-	MetricsRecorder MetricsRecorder
-	Configurator    *configuration.Configurator
-	SecretVerifier  *secrets.Verifier
-	RecoveryManager *secrets.RecoveryManager
-	TokenManager    *token.SimpleManager
+	Log                logr.Logger
+	Recorder           record.EventRecorder
+	VaultFactory       VaultClientFactory
+	SecretManager      SecretManager
+	MetricsRecorder    MetricsRecorder
+	Configurator       *configuration.Configurator
+	SecretVerifier     *secrets.Verifier
+	RecoveryManager    *secrets.RecoveryManager
+	TokenManager       *token.SimpleManager
+	TransitVaultCACert string // Path to CA certificate for transit vault
 }
 
 // VaultClientFactory creates Vault clients
@@ -510,6 +511,7 @@ func (r *VaultReconciler) UnsealVault(ctx context.Context, vaultClient vault.Cli
 		vtu.Spec.TransitVault.KeyName,
 		vtu.Spec.TransitVault.MountPath,
 		vtu.Spec.TransitVault.TLSSkipVerify,
+		r.getTransitVaultCACert(),
 		log)
 	if err != nil {
 		return fmt.Errorf("creating transit client: %w", err)
@@ -743,4 +745,9 @@ func (r *VaultReconciler) backupTokenToTransit(ctx context.Context, vtu *vaultv1
 	}
 
 	return nil
+}
+
+// getTransitVaultCACert returns the CA certificate path for the transit vault
+func (r *VaultReconciler) getTransitVaultCACert() string {
+	return r.TransitVaultCACert
 }

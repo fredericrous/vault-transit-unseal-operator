@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -35,6 +37,7 @@ var _ = Describe("Transit Client Unit Tests", func() {
 				"unseal-key",
 				"transit",
 				false,
+				"",
 				logger,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -48,6 +51,7 @@ var _ = Describe("Transit Client Unit Tests", func() {
 				"unseal-key",
 				"transit",
 				false,
+				"",
 				logger,
 			)
 			Expect(err).To(HaveOccurred())
@@ -61,6 +65,7 @@ var _ = Describe("Transit Client Unit Tests", func() {
 				"unseal-key",
 				"transit",
 				false,
+				"",
 				logger,
 			)
 			Expect(err).To(HaveOccurred())
@@ -74,10 +79,134 @@ var _ = Describe("Transit Client Unit Tests", func() {
 				"unseal-key",
 				"transit",
 				true,
+				"",
 				logger,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(client).NotTo(BeNil())
+		})
+
+		Context("CA Certificate handling", func() {
+			var tempDir string
+
+			BeforeEach(func() {
+				var err error
+				tempDir, err = os.MkdirTemp("", "transit-ca-test")
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			AfterEach(func() {
+				os.RemoveAll(tempDir)
+			})
+
+			It("should create client with valid CA certificate", func() {
+				// Create a valid CA cert file
+				caFile := filepath.Join(tempDir, "ca.crt")
+				// This is a valid self-signed CA certificate
+				validCACert := `-----BEGIN CERTIFICATE-----
+MIICpDCCAYwCCQDU+pQ3ZUD30jANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAls
+b2NhbGhvc3QwHhcNMjQwMTAxMDAwMDAwWhcNMjUwMTAxMDAwMDAwWjAUMRIwEAYD
+VQQDDAlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDV
+OZ4zQT5H5E7wRzKQucpd+vhrcKnvFa9CR7Bxx4RLHMxqq/nzr6vNK2DQqCTVV/8Q
+CRx1EEPUJomXZ8MB6j/h2r9OVnXkNOkx7trhcExl/p1KcyX0V9df42tmXiG2Rxho
+T0K7KRs6Q0pqBvNkwXqXYTxjRWG3qRAwOqq+pOl0pPKr7oMT3caULBaLVnxvNqUC
+qQB6VTQnzh8fkGJ9TVSKHYMqGFH/VC3TpGP2ST5WHNkBSpLfQpv7HHnbKWz0DPxp
+wuhFMkVY1r3gZI0jSJYeFMlO1lIqB5TXo+hUeAFQYvS6RYQ9z0iu6dLTwPl3Xl5s
+Tn6sdKlYF0BV5bPUPy1lAgMBAAEwDQYJKoZIhvcNAQELBQADggEBABjQ1mF3sR3P
+CUPqRBNlcQxHmYH5fkx3iLBWsYBCiTXlHZ1i9M5SERJmWKwKY0bhLokMdF+4K+gF
+1gGpQoJm3rjRj8JS9Mk03qcXSN5VRmI3KYvfMiZRM8703LpbqnQV5B6jGWX2TkPl
+g6WvZMJnJWMkkhPDR9d7DFnJ3JDU6L/MdAQJD3ixnDCfUqU3joWfXQBl6G15CWre
+c8lMu9Xz8d2snulhAqvn0cL5n7aPmK3rkdkQVb0LWJ5klvVNgzQoIuC6nDgQQuRU
+qvDnXm7BXmaXta6gVgYmwInHkVJFz7TjCYWRak0E3kH1qTmDrnKHmJvE9FbGqDbL
+sKx0F6gZQ5M=
+-----END CERTIFICATE-----`
+				err := os.WriteFile(caFile, []byte(validCACert), 0644)
+				Expect(err).NotTo(HaveOccurred())
+
+				client, err := transit.NewClient(
+					"https://vault.example.com",
+					"test-token",
+					"unseal-key",
+					"transit",
+					false,
+					caFile,
+					logger,
+				)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(client).NotTo(BeNil())
+			})
+
+			It("should create client with missing CA certificate file", func() {
+				nonExistentFile := filepath.Join(tempDir, "non-existent.crt")
+
+				_, err := transit.NewClient(
+					"https://vault.example.com",
+					"test-token",
+					"unseal-key",
+					"transit",
+					false,
+					nonExistentFile,
+					logger,
+				)
+				// Vault client validates CA file during TLS configuration
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("Error loading CA File"))
+				Expect(err.Error()).To(ContainSubstring("no such file or directory"))
+			})
+
+			It("should create client with empty CA certificate path", func() {
+				client, err := transit.NewClient(
+					"https://vault.example.com",
+					"test-token",
+					"unseal-key",
+					"transit",
+					false,
+					"",
+					logger,
+				)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(client).NotTo(BeNil())
+			})
+
+			It("should handle CA cert with TLS skip verify", func() {
+				caFile := filepath.Join(tempDir, "ca.crt")
+				err := os.WriteFile(caFile, []byte("dummy cert"), 0644)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Even with TLS skip verify, invalid CA cert will cause error
+				_, err = transit.NewClient(
+					"https://vault.example.com",
+					"test-token",
+					"unseal-key",
+					"transit",
+					true, // TLS skip verify should take precedence
+					caFile,
+					logger,
+				)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("Error loading CA File"))
+			})
+
+			It("should handle invalid CA certificate content", func() {
+				caFile := filepath.Join(tempDir, "invalid-ca.crt")
+				invalidContent := "This is not a valid certificate"
+				err := os.WriteFile(caFile, []byte(invalidContent), 0644)
+				Expect(err).NotTo(HaveOccurred())
+
+				_, err = transit.NewClient(
+					"https://vault.example.com",
+					"test-token",
+					"unseal-key",
+					"transit",
+					false,
+					caFile,
+					logger,
+				)
+				// Vault client validates PEM format during TLS configuration
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("Error loading CA File"))
+				Expect(err.Error()).To(ContainSubstring("Couldn't parse PEM"))
+			})
 		})
 	})
 
@@ -133,6 +262,7 @@ var _ = Describe("Transit Client Unit Tests", func() {
 				"unseal-key",
 				"transit",
 				false,
+				"",
 				logger,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -229,6 +359,7 @@ var _ = Describe("Transit Client Unit Tests", func() {
 				"key",
 				"transit",
 				false,
+				"",
 				logger,
 			)
 			Expect(err).NotTo(HaveOccurred())

@@ -63,6 +63,7 @@ type Config struct {
 	Token         string
 	Namespace     string
 	TLSSkipVerify bool
+	CACert        string // Path to CA certificate file
 	Timeout       time.Duration
 }
 
@@ -72,10 +73,18 @@ func NewClient(cfg *Config) (Client, error) {
 	vaultConfig.Address = cfg.Address
 	vaultConfig.Timeout = cfg.Timeout
 
-	if cfg.TLSSkipVerify {
-		if err := vaultConfig.ConfigureTLS(&vaultapi.TLSConfig{
-			Insecure: true,
-		}); err != nil {
+	// Configure TLS if needed
+	if cfg.TLSSkipVerify || cfg.CACert != "" {
+		tlsConfig := &vaultapi.TLSConfig{
+			Insecure: cfg.TLSSkipVerify,
+		}
+
+		// If CA cert is provided, use it
+		if cfg.CACert != "" {
+			tlsConfig.CACert = cfg.CACert
+		}
+
+		if err := vaultConfig.ConfigureTLS(tlsConfig); err != nil {
 			return nil, fmt.Errorf("configuring TLS: %w", err)
 		}
 	}

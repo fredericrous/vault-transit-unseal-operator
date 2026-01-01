@@ -19,7 +19,7 @@ type Client struct {
 }
 
 // NewClient creates a new transit client
-func NewClient(address, token, keyName, mountPath string, tlsSkipVerify bool, log logr.Logger) (*Client, error) {
+func NewClient(address, token, keyName, mountPath string, tlsSkipVerify bool, caCert string, log logr.Logger) (*Client, error) {
 	if token == "" {
 		return nil, fmt.Errorf("transit token cannot be empty")
 	}
@@ -32,10 +32,18 @@ func NewClient(address, token, keyName, mountPath string, tlsSkipVerify bool, lo
 	config.Address = address
 	config.Timeout = 30 * time.Second
 
-	if tlsSkipVerify {
-		if err := config.ConfigureTLS(&vaultapi.TLSConfig{
-			Insecure: true,
-		}); err != nil {
+	// Configure TLS if needed
+	if tlsSkipVerify || caCert != "" {
+		tlsConfig := &vaultapi.TLSConfig{
+			Insecure: tlsSkipVerify,
+		}
+
+		// If CA cert is provided, use it
+		if caCert != "" {
+			tlsConfig.CACert = caCert
+		}
+
+		if err := config.ConfigureTLS(tlsConfig); err != nil {
 			return nil, fmt.Errorf("configuring TLS: %w", err)
 		}
 	}

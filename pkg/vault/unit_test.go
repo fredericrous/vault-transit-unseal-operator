@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
@@ -525,6 +527,123 @@ var _ = Describe("Vault Client Unit Tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status.Initialized).To(BeTrue())
 			Expect(status.Sealed).To(BeFalse())
+		})
+	})
+
+	Context("CA Certificate configuration", func() {
+		var tempDir string
+
+		BeforeEach(func() {
+			var err error
+			tempDir, err = os.MkdirTemp("", "vault-ca-test")
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			os.RemoveAll(tempDir)
+		})
+
+		It("should handle valid CA certificate file", func() {
+			// Create a valid CA cert file (self-signed for testing)
+			caFile := filepath.Join(tempDir, "ca.crt")
+			// This is a valid self-signed CA certificate generated with:
+			// openssl req -new -x509 -key test.key -out test.crt -days 365
+			validCACert := `-----BEGIN CERTIFICATE-----
+MIICpDCCAYwCCQDU+pQ3ZUD30jANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAls
+b2NhbGhvc3QwHhcNMjQwMTAxMDAwMDAwWhcNMjUwMTAxMDAwMDAwWjAUMRIwEAYD
+VQQDDAlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDV
+OZ4zQT5H5E7wRzKQucpd+vhrcKnvFa9CR7Bxx4RLHMxqq/nzr6vNK2DQqCTVV/8Q
+CRx1EEPUJomXZ8MB6j/h2r9OVnXkNOkx7trhcExl/p1KcyX0V9df42tmXiG2Rxho
+T0K7KRs6Q0pqBvNkwXqXYTxjRWG3qRAwOqq+pOl0pPKr7oMT3caULBaLVnxvNqUC
+qQB6VTQnzh8fkGJ9TVSKHYMqGFH/VC3TpGP2ST5WHNkBSpLfQpv7HHnbKWz0DPxp
+wuhFMkVY1r3gZI0jSJYeFMlO1lIqB5TXo+hUeAFQYvS6RYQ9z0iu6dLTwPl3Xl5s
+Tn6sdKlYF0BV5bPUPy1lAgMBAAEwDQYJKoZIhvcNAQELBQADggEBABjQ1mF3sR3P
+CUPqRBNlcQxHmYH5fkx3iLBWsYBCiTXlHZ1i9M5SERJmWKwKY0bhLokMdF+4K+gF
+1gGpQoJm3rjRj8JS9Mk03qcXSN5VRmI3KYvfMiZRM8703LpbqnQV5B6jGWX2TkPl
+g6WvZMJnJWMkkhPDR9d7DFnJ3JDU6L/MdAQJD3ixnDCfUqU3joWfXQBl6G15CWre
+c8lMu9Xz8d2snulhAqvn0cL5n7aPmK3rkdkQVb0LWJ5klvVNgzQoIuC6nDgQQuRU
+qvDnXm7BXmaXta6gVgYmwInHkVJFz7TjCYWRak0E3kH1qTmDrnKHmJvE9FbGqDbL
+sKx0F6gZQ5M=
+-----END CERTIFICATE-----`
+			err := os.WriteFile(caFile, []byte(validCACert), 0644)
+			Expect(err).NotTo(HaveOccurred())
+
+			cfg := &vault.Config{
+				Address: "https://vault.example.com",
+				Token:   "test-token",
+				CACert:  caFile,
+			}
+
+			client, err := vault.NewClient(cfg)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(client).NotTo(BeNil())
+		})
+
+		It("should handle missing CA certificate file", func() {
+			nonExistentFile := filepath.Join(tempDir, "non-existent.crt")
+
+			cfg := &vault.Config{
+				Address: "https://vault.example.com",
+				Token:   "test-token",
+				CACert:  nonExistentFile,
+			}
+
+			_, err := vault.NewClient(cfg)
+			// The Vault API client validates the CA file during TLS configuration
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("Error loading CA File"))
+			Expect(err.Error()).To(ContainSubstring("no such file or directory"))
+		})
+
+		It("should handle invalid CA certificate file", func() {
+			// Create an invalid CA cert file
+			caFile := filepath.Join(tempDir, "invalid-ca.crt")
+			invalidContent := "This is not a valid certificate"
+			err := os.WriteFile(caFile, []byte(invalidContent), 0644)
+			Expect(err).NotTo(HaveOccurred())
+
+			cfg := &vault.Config{
+				Address: "https://vault.example.com",
+				Token:   "test-token",
+				CACert:  caFile,
+			}
+
+			_, err = vault.NewClient(cfg)
+			// The Vault API client validates PEM format during TLS configuration
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("Error loading CA File"))
+			Expect(err.Error()).To(ContainSubstring("Couldn't parse PEM"))
+		})
+
+		It("should handle empty CA certificate path", func() {
+			cfg := &vault.Config{
+				Address: "https://vault.example.com",
+				Token:   "test-token",
+				CACert:  "", // Empty path
+			}
+
+			client, err := vault.NewClient(cfg)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(client).NotTo(BeNil())
+		})
+
+		It("should handle CA cert with TLS skip verify", func() {
+			// Create a CA cert file
+			caFile := filepath.Join(tempDir, "ca.crt")
+			err := os.WriteFile(caFile, []byte("dummy cert"), 0644)
+			Expect(err).NotTo(HaveOccurred())
+
+			cfg := &vault.Config{
+				Address:       "https://vault.example.com",
+				Token:         "test-token",
+				CACert:        caFile,
+				TLSSkipVerify: true, // Should take precedence
+			}
+
+			// Even with TLS skip verify, invalid CA cert will cause error
+			_, err = vault.NewClient(cfg)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("Error loading CA File"))
 		})
 	})
 })

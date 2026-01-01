@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -66,6 +67,7 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	// Create vault client factory
 	vaultFactory := &vaultClientFactory{
 		tlsSkipVerify: !r.Config.EnableTLSValidation,
+		caCert:        os.Getenv("VAULT_CACERT"),
 		timeout:       r.Config.DefaultVaultTimeout,
 		discovery:     serviceDiscovery,
 	}
@@ -90,16 +92,17 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 
 	// Create vault reconciler with all dependencies
 	r.VaultReconciler = &reconciler.VaultReconciler{
-		Client:          r.Client,
-		Log:             r.Log.WithName("vault-reconciler"),
-		Recorder:        r.Recorder,
-		VaultFactory:    vaultFactory,
-		SecretManager:   secretMgr,
-		MetricsRecorder: metricsRecorder,
-		Configurator:    configurator,
-		SecretVerifier:  secretVerifier,
-		RecoveryManager: recoveryManager,
-		TokenManager:    tokenManager,
+		Client:             r.Client,
+		Log:                r.Log.WithName("vault-reconciler"),
+		Recorder:           r.Recorder,
+		VaultFactory:       vaultFactory,
+		SecretManager:      secretMgr,
+		MetricsRecorder:    metricsRecorder,
+		Configurator:       configurator,
+		SecretVerifier:     secretVerifier,
+		RecoveryManager:    recoveryManager,
+		TokenManager:       tokenManager,
+		TransitVaultCACert: os.Getenv("TRANSIT_VAULT_CACERT"),
 	}
 
 	// Create health checker with simple factory wrapper
@@ -184,6 +187,7 @@ func (r *VaultTransitUnsealReconciler) Reconcile(ctx context.Context, req ctrl.R
 // vaultClientFactory implements reconciler.VaultClientFactory
 type vaultClientFactory struct {
 	tlsSkipVerify bool
+	caCert        string
 	timeout       time.Duration
 	discovery     *discovery.ServiceDiscovery
 }
@@ -200,6 +204,7 @@ func (f *vaultClientFactory) NewClientForPod(ctx context.Context, pod *corev1.Po
 	return vault.NewClient(&vault.Config{
 		Address:       address,
 		TLSSkipVerify: f.tlsSkipVerify,
+		CACert:        f.caCert,
 		Timeout:       f.timeout,
 	})
 }
@@ -286,6 +291,7 @@ func (h *healthVaultFactory) NewClientForPod(pod *corev1.Pod) (vault.Client, err
 	return vault.NewClient(&vault.Config{
 		Address:       fmt.Sprintf("http://%s:8200", pod.Status.PodIP),
 		TLSSkipVerify: h.inner.tlsSkipVerify,
+		CACert:        h.inner.caCert,
 		Timeout:       h.inner.timeout,
 	})
 }
