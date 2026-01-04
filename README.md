@@ -375,6 +375,22 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ### Development
 
+#### Running Tests
+
+To run all tests including controller integration tests:
+```bash
+make test
+```
+
+This will automatically download required test binaries (etcd, kube-apiserver) on first run.
+
+For unit tests only:
+```bash
+make test-unit
+```
+
+#### Installation from Source
+
 To install from source:
 ```bash
 git clone https://github.com/fredericrous/vault-transit-unseal-operator.git
