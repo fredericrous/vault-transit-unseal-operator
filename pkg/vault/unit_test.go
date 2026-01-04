@@ -63,7 +63,7 @@ var _ = Describe("Vault Client Unit Tests", func() {
 	})
 
 	Context("NewClientForPod", func() {
-		It("should create client for pod", func() {
+		It("should return deprecation error", func() {
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "vault-0",
@@ -75,8 +75,9 @@ var _ = Describe("Vault Client Unit Tests", func() {
 			}
 
 			client, err := vault.NewClientForPod(pod, true)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(client).NotTo(BeNil())
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("deprecated"))
+			Expect(client).To(BeNil())
 		})
 	})
 

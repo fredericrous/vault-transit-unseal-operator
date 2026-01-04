@@ -28,7 +28,7 @@ Add the following to your Vault configuration (`vault.hcl`):
 ```hcl
 # Transit auto-unseal configuration
 seal "transit" {
-  address         = "http://your-transit-vault:8200"
+  address         = "http://your-transit-vault:8200"  # Replace with your transit vault address
   disable_renewal = "false"
   key_name        = "autounseal"
   mount_path      = "transit"
@@ -40,6 +40,37 @@ seal "transit" {
 ```
 
 The operator automates the unsealing process but requires Vault to be configured for transit unsealing. Without this configuration, Vault won't know how to decrypt its master key.
+
+## Service Discovery
+
+The operator automatically discovers Vault services in your cluster. You have two options:
+
+### Automatic Service Discovery (Default)
+The operator will find the appropriate service based on your pod selector:
+
+```yaml
+spec:
+  vaultPod:
+    namespace: vault
+    selector:
+      app.kubernetes.io/name: vault
+    # Service is auto-discovered - no configuration needed
+```
+
+### Explicit Service Configuration
+For precise control, specify the service name and port:
+
+```yaml
+spec:
+  vaultPod:
+    namespace: vault
+    selector:
+      app.kubernetes.io/name: vault
+    serviceName: vault-http     # Your Vault service name
+    servicePort: 8200           # Service port (not target port!)
+```
+
+**Important**: The `servicePort` is the port exposed by the Service (e.g., 8200), not the container's target port (e.g., 8300 for HTTP-in-mesh).
 
 ## Installation
 
@@ -76,7 +107,7 @@ spec:
     selector:
       app.kubernetes.io/name: vault
   transitVault:
-    address: http://transit-vault:8200
+    address: http://transit-vault:8200  # Transit vault address
     secretRef:
       name: vault-transit-token
   initialization:
@@ -106,7 +137,7 @@ metadata:
 data:
   vault.hcl: |
     seal "transit" {
-      address = "http://transit-vault:8200"
+      address = "http://transit-vault:8200"  # Transit vault endpoint
       key_name = "autounseal"
       mount_path = "transit"
       token = "TRANSIT_TOKEN_PLACEHOLDER"  # Will be replaced by init container
@@ -175,7 +206,7 @@ data:
     environments:
       production:
         transit:
-          address: "https://vault.prod.example.com:8200"
+          address: "https://vault.prod.example.com:8200"  # Production vault endpoint
 ---
 # Extract nested values
 apiVersion: vault.homelab.io/v1alpha1
@@ -189,7 +220,7 @@ spec:
       configMapKeyRef:
         name: vault-config
         key: config.yaml.environments.production.transit.address
-      default: "http://fallback-vault:8200"  # Fallback value
+      default: "http://fallback-vault:8200"  # Fallback transit vault address
     secretRef:
       name: vault-transit-token
 ```
@@ -212,7 +243,7 @@ spec:
       configMapKeyRef:
         name: vault-config
         key: transit.address
-      default: "https://backup-vault:8200"
+      default: "https://backup-vault:8200"  # Backup transit vault address
     secretRef:
       name: vault-transit-token
     keyName: autounseal-prod

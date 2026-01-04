@@ -109,12 +109,9 @@ func NewClient(cfg *Config) (Client, error) {
 }
 
 // NewClientForPod creates a Vault client configured for a specific pod
+// Deprecated: Use NewClient with service discovery instead
 func NewClientForPod(pod *corev1.Pod, tlsSkipVerify bool) (Client, error) {
-	return NewClient(&Config{
-		Address:       fmt.Sprintf("http://%s:8200", pod.Status.PodIP),
-		TLSSkipVerify: tlsSkipVerify,
-		Timeout:       10 * time.Second,
-	})
+	return nil, fmt.Errorf("NewClientForPod is deprecated, use NewClient with service discovery")
 }
 
 func (c *client) CheckStatus(ctx context.Context) (*Status, error) {

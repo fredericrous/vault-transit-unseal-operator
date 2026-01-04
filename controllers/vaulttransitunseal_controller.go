@@ -85,7 +85,7 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	secretVerifier := secrets.NewVerifier(r.Client, r.Log.WithName("secret-verifier"))
 
 	// Create simplified token manager for hybrid approach
-	tokenManager := token.NewSimpleManager(r.Client, r.Log.WithName("token-manager"), r.Scheme)
+	tokenManager := token.NewSimpleManager(r.Client, r.Log.WithName("token-manager"), r.Scheme, serviceDiscovery)
 
 	// Create recovery manager
 	recoveryManager := secrets.NewRecoveryManager(r.Client, r.Log.WithName("recovery-manager"), r.Recorder, r.Scheme, secretMgr, tokenManager)
@@ -193,12 +193,12 @@ type vaultClientFactory struct {
 }
 
 func (f *vaultClientFactory) NewClientForPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) (vault.Client, error) {
-	// Use service discovery to get the appropriate address
-	address, err := f.discovery.GetVaultAddress(ctx, &vtu.Spec.VaultPod)
+	// Always use service discovery, no fallback to pod IP
+	address, err := f.discovery.GetVaultServiceEndpoint(ctx, &vtu.Spec.VaultPod, pod)
 	if err != nil {
-		// Fallback to pod IP if service discovery fails
-		f.discovery.Log.Error(err, "Service discovery failed, falling back to pod IP")
-		address = fmt.Sprintf("http://%s:8200", pod.Status.PodIP)
+		return nil, operrors.NewConfigError("service discovery failed", err).
+			WithContext("pod", pod.Name).
+			WithContext("namespace", pod.Namespace)
 	}
 
 	return vault.NewClient(&vault.Config{
@@ -286,14 +286,9 @@ type healthVaultFactory struct {
 	inner *vaultClientFactory
 }
 
-func (h *healthVaultFactory) NewClientForPod(pod *corev1.Pod) (vault.Client, error) {
-	// For health checks, always use pod IP directly
-	return vault.NewClient(&vault.Config{
-		Address:       fmt.Sprintf("http://%s:8200", pod.Status.PodIP),
-		TLSSkipVerify: h.inner.tlsSkipVerify,
-		CACert:        h.inner.caCert,
-		Timeout:       h.inner.timeout,
-	})
+func (h *healthVaultFactory) NewClientForPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) (vault.Client, error) {
+	// Delegate to the inner factory which uses service discovery
+	return h.inner.NewClientForPod(ctx, pod, vtu)
 }
 
 // Helper functions

@@ -16,21 +16,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/discovery"
 )
 
 // SimpleManager handles only initial token creation
 type SimpleManager struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log              logr.Logger
+	Scheme           *runtime.Scheme
+	ServiceDiscovery *discovery.ServiceDiscovery
 }
 
 // NewSimpleManager creates a new simplified token manager
-func NewSimpleManager(client client.Client, log logr.Logger, scheme *runtime.Scheme) *SimpleManager {
+func NewSimpleManager(client client.Client, log logr.Logger, scheme *runtime.Scheme, serviceDiscovery *discovery.ServiceDiscovery) *SimpleManager {
 	return &SimpleManager{
-		Client: client,
-		Log:    log,
-		Scheme: scheme,
+		Client:           client,
+		Log:              log,
+		Scheme:           scheme,
+		ServiceDiscovery: serviceDiscovery,
 	}
 }
 
@@ -335,24 +338,12 @@ func (m *SimpleManager) CreateScopedTokenFromRoot(ctx context.Context, vtu *vaul
 	}
 	vaultClient.SetToken(rootToken)
 
-	// Get vault pod to determine address
-	pods := &corev1.PodList{}
-	labels := make(map[string]string)
-	if vtu.Spec.VaultPod.Selector != nil {
-		for k, v := range vtu.Spec.VaultPod.Selector {
-			labels[k] = v
-		}
+	// Use service discovery to get Vault address
+	address, err := m.ServiceDiscovery.GetVaultAddress(ctx, &vtu.Spec.VaultPod)
+	if err != nil {
+		return "", fmt.Errorf("getting vault address: %w", err)
 	}
-	if err := m.List(ctx, pods, client.InNamespace(vtu.Spec.VaultPod.Namespace), client.MatchingLabels(labels)); err != nil {
-		return "", fmt.Errorf("listing vault pods: %w", err)
-	}
-
-	if len(pods.Items) == 0 {
-		return "", fmt.Errorf("no vault pods found")
-	}
-
-	pod := &pods.Items[0]
-	vaultClient.SetAddress(fmt.Sprintf("http://%s:8200", pod.Status.PodIP))
+	vaultClient.SetAddress(address)
 
 	// Ensure policy exists first
 	if err := m.ensurePolicy(ctx, vtu, vaultClient); err != nil {

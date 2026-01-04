@@ -432,13 +432,13 @@ spec:
                       If not specified, the operator will auto-discover the service using the pod selector
                     type: string
                   servicePort:
-                    default: 8200
+                    default: 8300
                     description: Service port to connect to Vault
                     format: int32
                     type: integer
                   vaultAddress:
                     description: |-
-                      Override the full Vault address (e.g., https://vault.example.com:8200)
+                      Override the full Vault address (e.g., https://vault.example.com)
                       This takes precedence over service discovery
                     type: string
                 required:

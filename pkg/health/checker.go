@@ -36,7 +36,7 @@ type CheckResult struct {
 
 // VaultClientFactory creates Vault clients for pods
 type VaultClientFactory interface {
-	NewClientForPod(pod *corev1.Pod) (vault.Client, error)
+	NewClientForPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) (vault.Client, error)
 }
 
 // NewChecker creates a new health checker
@@ -145,7 +145,7 @@ func (h *Checker) checkVaultPods(ctx context.Context, vtu *vaultv1alpha1.VaultTr
 	pods = len(podList.Items)
 
 	for _, pod := range podList.Items {
-		if h.isPodHealthy(ctx, &pod) {
+		if h.isPodHealthy(ctx, &pod, vtu) {
 			healthy++
 		}
 	}
@@ -153,7 +153,7 @@ func (h *Checker) checkVaultPods(ctx context.Context, vtu *vaultv1alpha1.VaultTr
 	return pods, healthy
 }
 
-func (h *Checker) isPodHealthy(ctx context.Context, pod *corev1.Pod) bool {
+func (h *Checker) isPodHealthy(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) bool {
 	// Check if pod is running
 	if pod.Status.Phase != corev1.PodRunning {
 		return false
@@ -167,7 +167,7 @@ func (h *Checker) isPodHealthy(ctx context.Context, pod *corev1.Pod) bool {
 	}
 
 	// Try to connect to Vault
-	vaultClient, err := h.vaultFactory.NewClientForPod(pod)
+	vaultClient, err := h.vaultFactory.NewClientForPod(ctx, pod, vtu)
 	if err != nil {
 		h.log.V(1).Info("failed to create Vault client", "pod", pod.Name, "error", err)
 		return false

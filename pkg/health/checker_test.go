@@ -70,7 +70,7 @@ type mockVaultClientFactory struct {
 	err     error
 }
 
-func (m *mockVaultClientFactory) NewClientForPod(pod *corev1.Pod) (vault.Client, error) {
+func (m *mockVaultClientFactory) NewClientForPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) (vault.Client, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

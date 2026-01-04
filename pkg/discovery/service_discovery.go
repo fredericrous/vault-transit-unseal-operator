@@ -24,7 +24,7 @@ func (d *ServiceDiscovery) DiscoverVaultService(ctx context.Context, vaultSpec *
 	if vaultSpec.ServiceName != "" {
 		port := vaultSpec.ServicePort
 		if port == 0 {
-			port = 8200
+			port = 8300
 		}
 		d.Log.V(1).Info("Using configured service", "name", vaultSpec.ServiceName, "port", port)
 		return vaultSpec.ServiceName, port, nil
@@ -114,7 +114,7 @@ func (d *ServiceDiscovery) findVaultPort(service corev1.Service) int32 {
 	// First, look for ports by common names
 	for _, portName := range portNames {
 		for _, port := range service.Spec.Ports {
-			if port.Name == portName || (portName == "" && port.Port == 8200) {
+			if port.Name == portName || (portName == "" && (port.Port == 8200 || port.Port == 8300)) {
 				d.Log.V(2).Info("Found port", "name", port.Name, "port", port.Port)
 				return port.Port
 			}
@@ -126,8 +126,8 @@ func (d *ServiceDiscovery) findVaultPort(service corev1.Service) int32 {
 		return service.Spec.Ports[0].Port
 	}
 
-	// Default to 8200
-	return 8200
+	// Default to 8300 (HTTP-in-mesh)
+	return 8300
 }
 
 // GetVaultAddress constructs the full Vault address using service discovery
@@ -149,4 +149,11 @@ func (d *ServiceDiscovery) GetVaultAddress(ctx context.Context, vaultSpec *vault
 	d.Log.V(1).Info("Constructed vault address", "address", address)
 
 	return address, nil
+}
+
+// GetVaultServiceEndpoint returns the service endpoint for a specific pod
+// This is used when you need to connect to a specific pod through the service
+func (d *ServiceDiscovery) GetVaultServiceEndpoint(ctx context.Context, vaultSpec *vaultv1alpha1.VaultPodSpec, pod *corev1.Pod) (string, error) {
+	// Always use service discovery, never fall back to pod IP
+	return d.GetVaultAddress(ctx, vaultSpec)
 }

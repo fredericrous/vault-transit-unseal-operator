@@ -18,11 +18,11 @@ type VaultPodSpec struct {
 	ServiceName string `json:"serviceName,omitempty"`
 
 	// Service port to connect to Vault
-	// +kubebuilder:default=8200
+	// +kubebuilder:default=8300
 	// +optional
 	ServicePort int32 `json:"servicePort,omitempty"`
 
-	// Override the full Vault address (e.g., https://vault.example.com:8200)
+	// Override the full Vault address (e.g., https://vault.example.com)
 	// This takes precedence over service discovery
 	// +optional
 	VaultAddress string `json:"vaultAddress,omitempty"`
