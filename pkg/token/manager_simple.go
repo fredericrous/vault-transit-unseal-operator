@@ -253,9 +253,9 @@ func (m *SimpleManager) ensurePolicy(ctx context.Context, vtu *vaultv1alpha1.Vau
 
 	// Default vault-admin policy
 	policy := `
-# Admin access to most paths
+# Admin access to most paths (includes sudo for auth/mount management)
 path "*" {
-  capabilities = ["create", "read", "update", "delete", "list"]
+  capabilities = ["create", "read", "update", "delete", "list", "sudo"]
 }
 
 # Deny root token creation for safety
