@@ -713,6 +713,8 @@ func (r *VaultReconciler) backupTokenToTransit(ctx context.Context, vtu *vaultv1
 	kvClient, err := transit.NewKVClient(
 		address,
 		string(transitToken),
+		vtu.Spec.TransitVault.TLSSkipVerify,
+		r.TransitVaultCACert,
 		r.Log.WithName("transit-kv"))
 	if err != nil {
 		return fmt.Errorf("creating transit KV client: %w", err)

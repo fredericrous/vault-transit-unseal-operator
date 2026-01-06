@@ -19,7 +19,7 @@ type KVClient struct {
 }
 
 // NewKVClient creates a new KV client for the transit vault
-func NewKVClient(address, token string, log logr.Logger) (*KVClient, error) {
+func NewKVClient(address, token string, tlsSkipVerify bool, caCert string, log logr.Logger) (*KVClient, error) {
 	config := vaultapi.DefaultConfig()
 	config.Address = address
 
@@ -29,6 +29,22 @@ func NewKVClient(address, token string, log logr.Logger) (*KVClient, error) {
 
 	if token == "" {
 		return nil, fmt.Errorf("vault token is required")
+	}
+
+	// Configure TLS if needed
+	if tlsSkipVerify || caCert != "" {
+		tlsConfig := &vaultapi.TLSConfig{
+			Insecure: tlsSkipVerify,
+		}
+
+		// If CA cert is provided, use it
+		if caCert != "" {
+			tlsConfig.CACert = caCert
+		}
+
+		if err := config.ConfigureTLS(tlsConfig); err != nil {
+			return nil, fmt.Errorf("configuring TLS: %w", err)
+		}
 	}
 
 	client, err := vaultapi.NewClient(config)

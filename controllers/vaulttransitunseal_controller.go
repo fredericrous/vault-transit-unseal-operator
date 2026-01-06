@@ -88,7 +88,7 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	tokenManager := token.NewSimpleManager(r.Client, r.Log.WithName("token-manager"), r.Scheme, serviceDiscovery)
 
 	// Create recovery manager
-	recoveryManager := secrets.NewRecoveryManager(r.Client, r.Log.WithName("recovery-manager"), r.Recorder, r.Scheme, secretMgr, tokenManager)
+	recoveryManager := secrets.NewRecoveryManager(r.Client, r.Log.WithName("recovery-manager"), r.Recorder, r.Scheme, secretMgr, tokenManager, os.Getenv("TRANSIT_VAULT_CACERT"))
 
 	// Create vault reconciler with all dependencies
 	r.VaultReconciler = &reconciler.VaultReconciler{

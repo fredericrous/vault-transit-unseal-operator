@@ -30,22 +30,24 @@ type TokenManager interface {
 // RecoveryManager handles recovery of missing secrets
 type RecoveryManager struct {
 	client.Client
-	Log           logr.Logger
-	Recorder      record.EventRecorder
-	Scheme        *runtime.Scheme
-	secretManager Manager
-	tokenManager  TokenManager
+	Log                logr.Logger
+	Recorder           record.EventRecorder
+	Scheme             *runtime.Scheme
+	secretManager      Manager
+	tokenManager       TokenManager
+	TransitVaultCACert string // Path to CA certificate for transit vault
 }
 
 // NewRecoveryManager creates a new recovery manager
-func NewRecoveryManager(client client.Client, log logr.Logger, recorder record.EventRecorder, scheme *runtime.Scheme, secretManager Manager, tokenManager TokenManager) *RecoveryManager {
+func NewRecoveryManager(client client.Client, log logr.Logger, recorder record.EventRecorder, scheme *runtime.Scheme, secretManager Manager, tokenManager TokenManager, transitVaultCACert string) *RecoveryManager {
 	return &RecoveryManager{
-		Client:        client,
-		Log:           log,
-		Recorder:      recorder,
-		Scheme:        scheme,
-		secretManager: secretManager,
-		tokenManager:  tokenManager,
+		Client:             client,
+		Log:                log,
+		Recorder:           recorder,
+		Scheme:             scheme,
+		secretManager:      secretManager,
+		tokenManager:       tokenManager,
+		TransitVaultCACert: transitVaultCACert,
 	}
 }
 
@@ -457,6 +459,8 @@ func (r *RecoveryManager) recoverTokenFromTransit(ctx context.Context, vtu *vaul
 	kvClient, err := transit.NewKVClient(
 		address,
 		string(transitToken),
+		vtu.Spec.TransitVault.TLSSkipVerify,
+		r.TransitVaultCACert,
 		r.Log.WithName("transit-kv"))
 	if err != nil {
 		return "", fmt.Errorf("creating transit KV client: %w", err)
@@ -675,6 +679,8 @@ func (r *RecoveryManager) backupTokenToTransit(ctx context.Context, vtu *vaultv1
 	kvClient, err := transit.NewKVClient(
 		address,
 		string(transitToken),
+		vtu.Spec.TransitVault.TLSSkipVerify,
+		r.TransitVaultCACert,
 		r.Log.WithName("transit-kv"))
 	if err != nil {
 		return fmt.Errorf("creating transit KV client: %w", err)
