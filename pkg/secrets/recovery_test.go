@@ -313,7 +313,7 @@ func TestRecoverSecrets(t *testing.T) {
 			logger := testr.New(t)
 			recorder := record.NewFakeRecorder(100)
 			secretMgr := NewManager(client, logger.WithName("secrets"))
-			manager := NewRecoveryManager(client, logger, recorder, scheme, secretMgr, nil) // nil token manager for tests
+			manager := NewRecoveryManager(client, logger, recorder, scheme, secretMgr, nil, "") // nil token manager and empty CA cert for tests
 
 			// Attempt recovery
 			ctx := context.Background()
