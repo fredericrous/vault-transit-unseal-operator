@@ -73,12 +73,12 @@ func GenerateRootToken(ctx context.Context, client *vaultapi.Client, recoveryKey
 		return "", fmt.Errorf("no encoded token in response")
 	}
 
-	decodedTokenBytes, err := base64.RawStdEncoding.DecodeString(updateResp.EncodedToken)
+	decodedTokenBytes, err := base64.StdEncoding.DecodeString(updateResp.EncodedToken)
 	if err != nil {
 		return "", fmt.Errorf("decoding encoded token: %w", err)
 	}
 
-	otpBytes, err := base64.RawStdEncoding.DecodeString(otp)
+	otpBytes, err := base64.StdEncoding.DecodeString(otp)
 	if err != nil {
 		return "", fmt.Errorf("decoding OTP: %w", err)
 	}
@@ -137,7 +137,8 @@ func generateOTP() (string, error) {
 	}
 
 	// Encode as base64 for the OTP
-	return base64.RawStdEncoding.EncodeToString(bytes), nil
+	// Vault expects standard base64 encoding with padding
+	return base64.StdEncoding.EncodeToString(bytes), nil
 }
 
 // GetRootGenerationStatus returns the current status of root token generation

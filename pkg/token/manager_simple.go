@@ -17,7 +17,13 @@ import (
 
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/discovery"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/vault"
 )
+
+// VaultClientFactory creates properly configured Vault clients
+type VaultClientFactory interface {
+	NewClientForPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) (vault.Client, error)
+}
 
 // SimpleManager handles only initial token creation
 type SimpleManager struct {
@@ -25,15 +31,17 @@ type SimpleManager struct {
 	Log              logr.Logger
 	Scheme           *runtime.Scheme
 	ServiceDiscovery *discovery.ServiceDiscovery
+	VaultFactory     VaultClientFactory // Factory for creating properly configured Vault clients
 }
 
 // NewSimpleManager creates a new simplified token manager
-func NewSimpleManager(client client.Client, log logr.Logger, scheme *runtime.Scheme, serviceDiscovery *discovery.ServiceDiscovery) *SimpleManager {
+func NewSimpleManager(client client.Client, log logr.Logger, scheme *runtime.Scheme, serviceDiscovery *discovery.ServiceDiscovery, vaultFactory VaultClientFactory) *SimpleManager {
 	return &SimpleManager{
 		Client:           client,
 		Log:              log,
 		Scheme:           scheme,
 		ServiceDiscovery: serviceDiscovery,
+		VaultFactory:     vaultFactory,
 	}
 }
 
@@ -330,23 +338,30 @@ func (m *SimpleManager) CreateScopedTokenFromRoot(ctx context.Context, vtu *vaul
 		return rootToken, nil
 	}
 
-	// Create a Vault client with the root token
-	config := vaultapi.DefaultConfig()
-	vaultClient, err := vaultapi.NewClient(config)
+	// Get the first Vault pod for creating the client
+	pods, err := m.getVaultPods(ctx, &vtu.Spec.VaultPod)
 	if err != nil {
-		return "", fmt.Errorf("creating vault client: %w", err)
+		return "", fmt.Errorf("getting vault pods: %w", err)
 	}
-	vaultClient.SetToken(rootToken)
+	if len(pods) == 0 {
+		return "", fmt.Errorf("no vault pods found")
+	}
 
-	// Use service discovery to get Vault address
-	address, err := m.ServiceDiscovery.GetVaultAddress(ctx, &vtu.Spec.VaultPod)
+	// Use the VaultClientFactory to create a properly configured client (with TLS settings)
+	vaultClient, err := m.VaultFactory.NewClientForPod(ctx, &pods[0], vtu)
 	if err != nil {
-		return "", fmt.Errorf("getting vault address: %w", err)
+		return "", fmt.Errorf("creating vault client with factory: %w", err)
 	}
-	vaultClient.SetAddress(address)
+
+	// Get the API client and set the root token
+	apiClient := vaultClient.GetAPIClient()
+	if apiClient == nil {
+		return "", fmt.Errorf("vault client has no API client")
+	}
+	apiClient.SetToken(rootToken)
 
 	// Ensure policy exists first
-	if err := m.ensurePolicy(ctx, vtu, vaultClient); err != nil {
+	if err := m.ensurePolicy(ctx, vtu, apiClient); err != nil {
 		return "", fmt.Errorf("failed to ensure policy: %w", err)
 	}
 
@@ -376,7 +391,7 @@ func (m *SimpleManager) CreateScopedTokenFromRoot(ctx context.Context, vtu *vaul
 		},
 	}
 
-	resp, err := vaultClient.Auth().Token().Create(tokenReq)
+	resp, err := apiClient.Auth().Token().Create(tokenReq)
 	if err != nil {
 		return "", fmt.Errorf("failed to create scoped token: %w", err)
 	}
@@ -384,7 +399,7 @@ func (m *SimpleManager) CreateScopedTokenFromRoot(ctx context.Context, vtu *vaul
 	newToken := resp.Auth.ClientToken
 
 	// Revoke the root token now that we have the scoped token
-	if err := vaultClient.Auth().Token().RevokeSelf(rootToken); err != nil {
+	if err := apiClient.Auth().Token().RevokeSelf(rootToken); err != nil {
 		// Log the error but don't fail - we have the new token
 		m.Log.Error(err, "Failed to revoke root token after creating scoped token")
 	} else {

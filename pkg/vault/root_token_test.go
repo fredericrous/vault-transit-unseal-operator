@@ -15,7 +15,7 @@ func TestGenerateOTP(t *testing.T) {
 	assert.NotEmpty(t, otp1)
 
 	// Verify it's valid base64
-	decoded, err := base64.RawStdEncoding.DecodeString(otp1)
+	decoded, err := base64.StdEncoding.DecodeString(otp1)
 	require.NoError(t, err)
 	assert.Len(t, decoded, 16) // Should be 16 bytes
 
@@ -160,7 +160,7 @@ func TestTokenDecoding(t *testing.T) {
 	testOTP := "abcdefghijklmnop" // 16 chars
 
 	// Encode the token (simulate what Vault does)
-	otpBytes, err := base64.RawStdEncoding.DecodeString(base64.RawStdEncoding.EncodeToString([]byte(testOTP)))
+	otpBytes, err := base64.StdEncoding.DecodeString(base64.StdEncoding.EncodeToString([]byte(testOTP)))
 	require.NoError(t, err)
 
 	tokenBytes := []byte(testToken)

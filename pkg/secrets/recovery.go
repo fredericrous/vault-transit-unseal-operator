@@ -196,10 +196,14 @@ func (r *RecoveryManager) recoverAdminToken(ctx context.Context, vtu *vaultv1alp
 
 			// Check if this is a root token and TokenManagement is enabled
 			if r.tokenManager != nil && vtu.Spec.TokenManagement != nil && vtu.Spec.TokenManagement.Enabled {
-				// Check if the recovered token is a root token
-				// We assume root tokens don't have a prefix like 'hvs.'
-				if !strings.HasPrefix(token, "hvs.") && !strings.HasPrefix(token, "s.") {
-					r.Log.Info("Recovered token appears to be root, creating scoped token")
+				// Check if the recovered token is a root token by looking it up
+				isRoot, err := r.isRootToken(vaultClient, token)
+				if err != nil {
+					r.Log.Error(err, "Failed to check if token is root, assuming it is for safety")
+					isRoot = true
+				}
+				if isRoot {
+					r.Log.Info("Recovered token is root, creating scoped token")
 					scopedToken, err := r.tokenManager.CreateScopedTokenFromRoot(ctx, vtu, token)
 					if err != nil {
 						r.Log.Error(err, "Failed to create scoped token from recovered root token")
@@ -216,7 +220,7 @@ func (r *RecoveryManager) recoverAdminToken(ctx context.Context, vtu *vaultv1alp
 	}
 
 	// Step 2: Try automatic generation if enabled
-	if vtu.Spec.Initialization.TokenRecovery.AutoGenerate {
+	if vtu.Spec.Initialization.TokenRecovery.Enabled && vtu.Spec.Initialization.TokenRecovery.AutoGenerate {
 		r.Log.Info("Attempting automatic token generation")
 
 		// Check if we have recovery keys
@@ -713,4 +717,31 @@ func (r *RecoveryManager) backupTokenToTransit(ctx context.Context, vtu *vaultv1
 	}
 
 	return nil
+}
+
+// isRootToken checks if a token is a root token by looking it up and checking policies
+func (r *RecoveryManager) isRootToken(vaultClient *vaultapi.Client, token string) (bool, error) {
+	// Set the token temporarily
+	oldToken := vaultClient.Token()
+	vaultClient.SetToken(token)
+	defer vaultClient.SetToken(oldToken)
+
+	// Look up the token
+	secret, err := vaultClient.Logical().Write("auth/token/lookup-self", nil)
+	if err != nil {
+		return false, fmt.Errorf("looking up token: %w", err)
+	}
+
+	// Check if it has the root policy
+	if secret != nil && secret.Data != nil {
+		if policies, ok := secret.Data["policies"].([]interface{}); ok {
+			for _, policy := range policies {
+				if policyStr, ok := policy.(string); ok && policyStr == "root" {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
 }
