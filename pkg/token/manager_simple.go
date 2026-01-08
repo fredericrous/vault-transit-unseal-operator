@@ -514,17 +514,17 @@ func (m *SimpleManager) replaceRootToken(ctx context.Context, vtu *vaultv1alpha1
 func (m *SimpleManager) getVaultPods(ctx context.Context, vaultPodSpec *vaultv1alpha1.VaultPodSpec) ([]corev1.Pod, error) {
 	// Build label selector from the selector map
 	labelSelector := labels.SelectorFromSet(vaultPodSpec.Selector).String()
-	
+
 	podList := &corev1.PodList{}
 	listOpts := []client.ListOption{
 		client.InNamespace(vaultPodSpec.Namespace),
 		client.MatchingLabelsSelector{Selector: labels.SelectorFromSet(vaultPodSpec.Selector)},
 	}
-	
+
 	if err := m.List(ctx, podList, listOpts...); err != nil {
 		return nil, fmt.Errorf("failed to list vault pods: %w", err)
 	}
-	
+
 	m.Log.V(1).Info("Found vault pods", "count", len(podList.Items), "selector", labelSelector)
 	return podList.Items, nil
 }

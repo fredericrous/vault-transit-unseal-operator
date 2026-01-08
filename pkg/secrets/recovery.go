@@ -350,7 +350,7 @@ func (r *RecoveryManager) createRecoveryPlaceholder(ctx context.Context, vtu *va
 	data := map[string][]byte{
 		"placeholder": []byte(fmt.Sprintf("RECOVERY-REQUIRED: See recovery-instructions.txt")),
 	}
-	
+
 	if action.SecretName == vtu.Spec.Initialization.SecretNames.AdminToken {
 		data["token"] = []byte("PLACEHOLDER-MANUAL-RECOVERY-REQUIRED")
 		data["recovery-instructions.txt"] = []byte(reason)
