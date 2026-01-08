@@ -10,7 +10,7 @@
 - ⚡ **Post-Unseal Setup** - Auto-configures KV engine and External Secrets Operator
 - 🔄 **Integration Ready** - Works with Reflector and Reloader out of the box
 - 🔑 **Automatic Token Recovery** - Backs up and recovers admin tokens for disaster recovery (v1.6.0+)
-- 🚨 **Self-Healing** - Automatically generates new tokens when missing using recovery keys
+- 🚨 **Self-Healing** - Restores admin tokens from transit backup or provides manual recovery steps
 
 ## Prerequisites
 
@@ -290,7 +290,7 @@ spec:
 - **Production**: Keep `storeRecoveryKeys: false` and capture keys from logs
 - **Development**: Set `storeRecoveryKeys: true` for convenience
 - **Token Rotation**: Implement regular transit token rotation
-- **Root Token Security**: The operator never automatically generates root tokens, following HashiCorp's security best practices
+- **Root Token Security**: The operator never generates root tokens; recovery is manual and audited
 
 ### Created Secrets
 
@@ -313,7 +313,7 @@ The instructions will guide you through:
 4. Updating the Kubernetes secret
 5. Revoking the root token for security
 
-**Important**: Following HashiCorp's security best practices, the operator will never automatically generate root tokens. Manual intervention ensures proper oversight and immediate revocation of root tokens after use.
+**Important**: Following HashiCorp's security best practices, the operator never generates root tokens. Manual intervention ensures proper oversight and immediate revocation of root tokens after use.
 
 ## Troubleshooting
 

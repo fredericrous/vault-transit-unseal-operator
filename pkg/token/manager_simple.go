@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -507,4 +508,23 @@ func (m *SimpleManager) replaceRootToken(ctx context.Context, vtu *vaultv1alpha1
 	vtu.Status.TokenStatus.LastRenewedAt = time.Now().Format(time.RFC3339)
 
 	return nil
+}
+
+// getVaultPods returns pods matching the vault pod spec
+func (m *SimpleManager) getVaultPods(ctx context.Context, vaultPodSpec *vaultv1alpha1.VaultPodSpec) ([]corev1.Pod, error) {
+	// Build label selector from the selector map
+	labelSelector := labels.SelectorFromSet(vaultPodSpec.Selector).String()
+	
+	podList := &corev1.PodList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(vaultPodSpec.Namespace),
+		client.MatchingLabelsSelector{Selector: labels.SelectorFromSet(vaultPodSpec.Selector)},
+	}
+	
+	if err := m.List(ctx, podList, listOpts...); err != nil {
+		return nil, fmt.Errorf("failed to list vault pods: %w", err)
+	}
+	
+	m.Log.V(1).Info("Found vault pods", "count", len(podList.Items), "selector", labelSelector)
+	return podList.Items, nil
 }

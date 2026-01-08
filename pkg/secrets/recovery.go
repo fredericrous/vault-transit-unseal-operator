@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	vaultapi "github.com/hashicorp/vault/api"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -387,60 +386,6 @@ func (r *RecoveryManager) createRecoveryPlaceholder(ctx context.Context, vtu *va
 	return nil
 }
 
-// getRecoveryKeys retrieves recovery keys from secret storage
-func (r *RecoveryManager) getRecoveryKeys(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) ([]string, error) {
-	if !vtu.Spec.Initialization.SecretNames.StoreRecoveryKeys {
-		return nil, fmt.Errorf("recovery keys storage is disabled")
-	}
-
-	secret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{
-		Namespace: vtu.Spec.VaultPod.Namespace,
-		Name:      vtu.Spec.Initialization.SecretNames.RecoveryKeys,
-	}, secret); err != nil {
-		return nil, fmt.Errorf("getting recovery keys secret: %w", err)
-	}
-
-	var keys []string
-	var placeholderCount int
-	var validKeyCount int
-
-	for i := 0; i < vtu.Spec.Initialization.RecoveryShares; i++ {
-		key := fmt.Sprintf("recovery-key-%d", i)
-		if data, exists := secret.Data[key]; exists {
-			keyStr := string(data)
-			// Check if this is a placeholder key
-			if strings.Contains(keyStr, "placeholder") || strings.Contains(keyStr, "PLACEHOLDER") ||
-				strings.Contains(keyStr, "RECOVERY-REQUIRED") {
-				placeholderCount++
-				r.Log.Info("Found placeholder recovery key", "key", key)
-				continue
-			}
-			keys = append(keys, keyStr)
-			validKeyCount++
-		}
-	}
-
-	// Check if we have enough valid keys for recovery threshold
-	if validKeyCount < vtu.Spec.Initialization.RecoveryThreshold {
-		if placeholderCount > 0 {
-			return nil, fmt.Errorf("insufficient valid recovery keys: have %d valid + %d placeholders, need %d",
-				validKeyCount, placeholderCount, vtu.Spec.Initialization.RecoveryThreshold)
-		}
-		return nil, fmt.Errorf("insufficient recovery keys: have %d, need %d", validKeyCount, vtu.Spec.Initialization.RecoveryThreshold)
-	}
-
-	// Log warning about placeholders but proceed if we have enough valid keys
-	if placeholderCount > 0 {
-		r.Log.Info("Recovery keys contain placeholders but enough valid keys exist",
-			"validKeys", validKeyCount,
-			"placeholders", placeholderCount,
-			"threshold", vtu.Spec.Initialization.RecoveryThreshold)
-	}
-
-	return keys, nil
-}
-
 // GenerateSecureToken generates a cryptographically secure random token
 func GenerateSecureToken(length int) (string, error) {
 	bytes := make([]byte, length)
@@ -640,36 +585,6 @@ func (r *RecoveryManager) restoreAdminToken(ctx context.Context, vtu *vaultv1alp
 	return nil
 }
 
-// generateNewRootToken generates a new root token using recovery keys
-func (r *RecoveryManager) generateNewRootToken(ctx context.Context, vaultClient vault.Client, recoveryKeys []string) (string, error) {
-	r.Log.Info("Generating new root token using recovery keys")
-
-	// Get the API client from the vault client interface
-	apiClient := vaultClient.GetAPIClient()
-	if apiClient == nil {
-		return "", fmt.Errorf("vault client does not support API access")
-	}
-
-	// Use the vault package's root token generation
-	rootToken, err := vault.GenerateRootToken(ctx, apiClient, recoveryKeys)
-	if err != nil {
-		return "", fmt.Errorf("generating root token: %w", err)
-	}
-
-	r.Log.Info("Successfully generated new root token")
-	return rootToken, nil
-}
-
-// createScopedAdminToken creates a scoped admin token from root token
-func (r *RecoveryManager) createScopedAdminToken(ctx context.Context, vaultClient vault.Client, rootToken string) (string, error) {
-	r.Log.Info("Creating scoped admin token from root token")
-
-	// This is just a stub - the actual token creation needs to happen
-	// in the recoverAdminToken method where we have access to VTU
-	// The TokenManager requires VTU context that we don't have here
-	return rootToken, nil
-}
-
 // backupTokenToTransit backs up token to transit vault
 func (r *RecoveryManager) backupTokenToTransit(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, token string) error {
 	// Resolve transit vault address
@@ -730,15 +645,20 @@ func (r *RecoveryManager) backupTokenToTransit(ctx context.Context, vtu *vaultv1
 	return nil
 }
 
-// isRootToken checks if a token is a root token by looking it up and checking policies
-func (r *RecoveryManager) isRootToken(vaultClient *vaultapi.Client, token string) (bool, error) {
+// isRootToken checks if a token is a root token by looking it up and checking policies.
+func (r *RecoveryManager) isRootToken(vaultClient vault.Client, token string) (bool, error) {
+	apiClient := vaultClient.GetAPIClient()
+	if apiClient == nil {
+		return false, fmt.Errorf("vault client does not support API access")
+	}
+
 	// Set the token temporarily
-	oldToken := vaultClient.Token()
-	vaultClient.SetToken(token)
-	defer vaultClient.SetToken(oldToken)
+	oldToken := apiClient.Token()
+	apiClient.SetToken(token)
+	defer apiClient.SetToken(oldToken)
 
 	// Look up the token
-	secret, err := vaultClient.Logical().Write("auth/token/lookup-self", nil)
+	secret, err := apiClient.Logical().Write("auth/token/lookup-self", nil)
 	if err != nil {
 		return false, fmt.Errorf("looking up token: %w", err)
 	}
@@ -764,3 +684,4 @@ func labelSelectorString(labels map[string]string) string {
 		parts = append(parts, fmt.Sprintf("%s=%s", k, v))
 	}
 	return strings.Join(parts, ",")
+}

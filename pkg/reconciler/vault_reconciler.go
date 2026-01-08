@@ -618,8 +618,8 @@ func (r *VaultReconciler) GenerateRootToken(ctx context.Context, vaultClient vau
 		return nil
 	}
 
-	// If we have recovery keys, we could potentially automate the root token generation
-	// For now, we'll still create a placeholder and log instructions
+	// Recovery keys are available, but root token generation is manual by design.
+	// Create a placeholder and log instructions.
 	log.Info("Recovery keys available", "count", len(recoveryKeys))
 
 	placeholder := map[string][]byte{
