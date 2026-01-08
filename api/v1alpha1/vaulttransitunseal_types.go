@@ -141,10 +141,6 @@ type TokenRecoverySpec struct {
 	// Defaults to vault-transit-unseal/<namespace>/<name>/admin-token
 	// +optional
 	TransitKVPath string `json:"transitKVPath,omitempty"`
-
-	// Automatically generate new admin token if missing during recovery
-	// +kubebuilder:default=true
-	AutoGenerate bool `json:"autoGenerate,omitempty"`
 }
 
 // SecretNamesSpec defines secret names

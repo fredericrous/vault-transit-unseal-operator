@@ -40,10 +40,9 @@ spec:
     
     # Token recovery configuration (new in v1.6.0)
     tokenRecovery:
-      enabled: true                    # Enable automatic token recovery
+      enabled: true                    # Enable token recovery features
       backupToTransit: true            # Backup tokens to transit vault
       # transitKVPath: custom/path     # Optional: defaults to vault-transit-unseal/<namespace>/<name>/admin-token
-      autoGenerate: true               # Auto-generate new token if backup not found
   
   monitoring:
     checkInterval: "30s"

@@ -9,14 +9,14 @@ The vault-transit-unseal-operator now supports automatic token recovery and re-i
 - Manual intervention corrupted the admin token
 - Disaster recovery of a cluster with existing Vault data
 
-## Automatic Token Recovery (v1.6.0+)
+## Token Recovery (v1.6.0+)
 
-The operator now includes automatic token recovery capabilities that can:
+The operator includes token recovery capabilities that can:
 
 1. **Backup admin tokens** to the transit Vault's KV store during initialization
 2. **Automatically recover** admin tokens from transit Vault backup
-3. **Generate new root tokens** using recovery keys (when available)
-4. **Create scoped admin tokens** instead of persisting root tokens
+3. **Provide detailed instructions** for manual root token generation
+4. **Create placeholder secrets** with recovery procedures when tokens are missing
 
 ### Configuration
 
@@ -34,20 +34,18 @@ spec:
       enabled: true                    # Enable automatic recovery
       backupToTransit: true           # Backup tokens to transit vault
       transitKVPath: ""               # Optional: custom KV path (default: vault-transit-unseal/<namespace>/<name>/admin-token)
-      autoGenerate: true              # Auto-generate token if backup not found
 ```
 
-### How Automatic Recovery Works
+### How Token Recovery Works
 
 When the admin token is missing:
 
 1. **Check Transit Backup**: If `backupToTransit` is enabled, the operator attempts to recover the token from the transit Vault's KV store
-2. **Generate New Token**: If no backup is found and `autoGenerate` is enabled, the operator will:
-   - Use recovery keys to generate a new root token
-   - Create a scoped admin token with appropriate policies
-   - Revoke the temporary root token
-   - Backup the new admin token to transit Vault
-3. **Fallback**: If automatic recovery fails, a placeholder is created with manual recovery instructions
+2. **Manual Recovery Required**: If no backup is found, the operator will:
+   - Create a placeholder secret with detailed recovery instructions
+   - Include step-by-step commands for generating a root token
+   - Provide guidance on creating scoped admin tokens
+   - Document security best practices for root token handling
 
 ### Prerequisites for Transit Vault Backup
 
@@ -60,7 +58,7 @@ The transit Vault must have:
 When automatic recovery is not possible or `forceReinitialize: true` is set:
 
 1. The operator checks if Vault is already initialized
-2. If initialized and unsealed, it attempts automatic recovery first
+2. If initialized and unsealed, it attempts token recovery from backup
 3. If recovery fails, it creates a placeholder admin token
 4. The placeholder includes instructions for manual root token generation
 5. The `forceReinitialize` flag is automatically cleared after execution
@@ -148,15 +146,16 @@ kubectl apply -f your-vault-transit-unseal.yaml
 3. KV v2 engine is enabled at `secret/` mount on transit vault
 4. Check operator logs for specific error: `kubectl logs -n vault-transit-unseal-operator <operator-pod>`
 
-#### Issue: Automatic token generation fails
+#### Issue: Manual token recovery needed
 
-**Symptoms**: "Failed to generate new root token" in logs
+**Symptoms**: Placeholder secret created with "MANUAL-RECOVERY-REQUIRED"
 
-**Check**:
-1. Recovery keys are available in the configured secret
-2. Sufficient recovery keys are present (meets threshold)
-3. Vault is initialized and unsealed
-4. Recovery keys are valid for the current Vault instance
+**Solution**:
+1. View recovery instructions: `kubectl get secret vault-admin-token -n vault -o jsonpath='{.data.recovery-instructions\.txt}' | base64 -d`
+2. Follow the step-by-step guide to generate a root token
+3. Create a scoped admin token from the root token
+4. Update the Kubernetes secret with the new token
+5. Revoke the root token immediately after use
 
 #### Issue: Token backup to transit fails during initialization
 

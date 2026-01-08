@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	vaultapi "github.com/hashicorp/vault/api"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -219,73 +220,75 @@ func (r *RecoveryManager) recoverAdminToken(ctx context.Context, vtu *vaultv1alp
 		}
 	}
 
-	// Step 2: Try automatic generation if enabled
-	if vtu.Spec.Initialization.TokenRecovery.Enabled && vtu.Spec.Initialization.TokenRecovery.AutoGenerate {
-		r.Log.Info("Attempting automatic token generation")
+	// Step 2: Fall back to placeholder with detailed instructions
+	r.Log.Info("Admin token missing, manual recovery required")
 
-		// Check if we have recovery keys
-		recoveryKeys, err := r.getRecoveryKeys(ctx, vtu)
-		if err != nil {
-			r.Log.Error(err, "Cannot automatically generate token without recovery keys")
-			// If recovery keys are placeholders, create a more informative placeholder token
-			if strings.Contains(err.Error(), "placeholder") {
-				return r.createRecoveryPlaceholder(ctx, vtu, action,
-					"Recovery keys are placeholders - Vault needs re-initialization or manual recovery")
-			}
-		} else {
-			// Generate new root token using recovery keys
-			newToken, err := r.generateNewRootToken(ctx, vaultClient, recoveryKeys)
-			if err != nil {
-				r.Log.Error(err, "Failed to generate new root token")
-			} else {
-				r.Log.Info("Successfully generated new root token")
+	// Create detailed recovery instructions
+	recoveryInstructions := fmt.Sprintf(`Admin token is missing and requires manual recovery.
 
-				// Create scoped admin token and revoke root
-				adminToken := newToken
-				if r.tokenManager != nil && vtu.Spec.TokenManagement != nil && vtu.Spec.TokenManagement.Enabled {
-					scopedToken, err := r.tokenManager.CreateScopedTokenFromRoot(ctx, vtu, newToken)
-					if err != nil {
-						r.Log.Error(err, "Failed to create scoped admin token, using root token")
-					} else {
-						r.Log.Info("Successfully created scoped admin token and revoked root token")
-						adminToken = scopedToken
-					}
-				} else {
-					r.Log.Info("Token management not enabled, using root token directly")
-				}
+Follow these steps to recover the admin token:
 
-				// Restore the token
-				if err := r.restoreAdminToken(ctx, vtu, action, adminToken); err != nil {
-					return err
-				}
+1. Get the recovery keys (if stored in Kubernetes):
+   kubectl get secret %s -n %s -o jsonpath='{.data}' | jq -r 'to_entries[] | select(.key | startswith("recovery-key-")) | .value' | base64 -d
 
-				// Backup the new token if enabled
-				if vtu.Spec.Initialization.TokenRecovery.BackupToTransit {
-					if err := r.backupTokenToTransit(ctx, vtu, adminToken); err != nil {
-						r.Log.Error(err, "Failed to backup new token to transit vault")
-					}
-				}
+2. Generate a new root token:
+   # First, get a Vault pod name
+   export VAULT_POD=$(kubectl get pods -n %s -l %s -o jsonpath='{.items[0].metadata.name}')
+   
+   # Start root token generation
+   kubectl exec -n %s $VAULT_POD -- vault operator generate-root -init
+   # Note the OTP and Nonce values from the output
 
-				return nil
-			}
-		}
-	}
+   # Provide recovery keys (repeat for each key until threshold is met)
+   kubectl exec -n %s $VAULT_POD -- vault operator generate-root -nonce=<NONCE> <RECOVERY_KEY>
 
-	// Step 3: Fall back to placeholder with instructions
-	r.Log.Info("Automatic recovery not possible, creating placeholder",
-		"action", "Use 'vault operator generate-root' manually with the recovery keys")
+   # Decode the final token
+   kubectl exec -n %s $VAULT_POD -- vault operator generate-root -decode=<ENCODED_TOKEN> -otp=<OTP>
+
+3. Create a scoped admin token (recommended instead of using root directly):
+   # Set the root token
+   export VAULT_TOKEN=<ROOT_TOKEN_FROM_STEP_2>
+   
+   # Create admin policy if not exists
+   kubectl exec -n %s $VAULT_POD -- vault policy write vault-admin - <<EOF
+path "*" {
+  capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+}
+EOF
+
+   # Create scoped admin token
+   kubectl exec -n %s $VAULT_POD -- vault token create -policy=vault-admin -ttl=24h
+
+4. Update the admin token secret:
+   kubectl create secret generic %s -n %s --from-literal=token=<ADMIN_TOKEN> --dry-run=client -o yaml | kubectl apply -f -
+
+5. IMPORTANT: Revoke the root token after creating the admin token:
+   kubectl exec -n %s $VAULT_POD -- vault token revoke <ROOT_TOKEN>
+
+If recovery keys are not available in Kubernetes, you will need to retrieve them from your secure storage.`,
+		vtu.Spec.Initialization.SecretNames.RecoveryKeys,
+		vtu.Spec.VaultPod.Namespace,
+		vtu.Spec.VaultPod.Namespace,
+		labelSelectorString(vtu.Spec.VaultPod.Selector),
+		vtu.Spec.VaultPod.Namespace,
+		vtu.Spec.VaultPod.Namespace,
+		vtu.Spec.VaultPod.Namespace,
+		vtu.Spec.VaultPod.Namespace,
+		vtu.Spec.VaultPod.Namespace,
+		vtu.Spec.Initialization.SecretNames.AdminToken,
+		vtu.Spec.VaultPod.Namespace,
+		vtu.Spec.VaultPod.Namespace,
+	)
 
 	// Record an event with clear instructions
 	if r.Recorder != nil {
 		r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "ManualRecoveryRequired",
-			"Admin token is missing. Manual recovery required: kubectl exec into vault pod and run 'vault operator generate-root' with recovery keys from secret %s/%s",
-			vtu.Spec.VaultPod.Namespace, vtu.Spec.Initialization.SecretNames.RecoveryKeys)
+			"Admin token is missing. See secret %s/%s annotations for detailed recovery instructions",
+			action.Namespace, action.SecretName)
 	}
 
 	// Create placeholder with detailed instructions
-	return r.createRecoveryPlaceholder(ctx, vtu, action,
-		fmt.Sprintf("Admin token missing - use 'vault operator generate-root' with recovery keys from %s/%s",
-			vtu.Spec.VaultPod.Namespace, vtu.Spec.Initialization.SecretNames.RecoveryKeys))
+	return r.createRecoveryPlaceholder(ctx, vtu, action, recoveryInstructions)
 }
 
 // recoverRecoveryKeys attempts to recover recovery keys
@@ -344,19 +347,27 @@ func (r *RecoveryManager) updateIncompleteSecret(ctx context.Context, vtu *vault
 
 // createRecoveryPlaceholder creates a placeholder secret with recovery instructions
 func (r *RecoveryManager) createRecoveryPlaceholder(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, action RecoveryAction, reason string) error {
+	// For admin token, include the full reason as the token value for better visibility
+	data := map[string][]byte{
+		"placeholder": []byte(fmt.Sprintf("RECOVERY-REQUIRED: See recovery-instructions.txt")),
+	}
+	
+	if action.SecretName == vtu.Spec.Initialization.SecretNames.AdminToken {
+		data["token"] = []byte("PLACEHOLDER-MANUAL-RECOVERY-REQUIRED")
+		data["recovery-instructions.txt"] = []byte(reason)
+	}
+
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      action.SecretName,
 			Namespace: action.Namespace,
 			Annotations: map[string]string{
 				"vault.homelab.io/recovery-required": "true",
-				"vault.homelab.io/recovery-reason":   reason,
+				"vault.homelab.io/recovery-reason":   "Manual intervention required - see recovery-instructions.txt in secret data",
 				"vault.homelab.io/recovery-time":     time.Now().Format(time.RFC3339),
 			},
 		},
-		Data: map[string][]byte{
-			"placeholder": []byte(fmt.Sprintf("RECOVERY-REQUIRED: %s", reason)),
-		},
+		Data: data,
 	}
 
 	// Only set controller reference if in the same namespace to avoid cross-namespace ownership
@@ -745,3 +756,11 @@ func (r *RecoveryManager) isRootToken(vaultClient *vaultapi.Client, token string
 
 	return false, nil
 }
+
+// labelSelectorString converts a map of labels to a label selector string
+func labelSelectorString(labels map[string]string) string {
+	var parts []string
+	for k, v := range labels {
+		parts = append(parts, fmt.Sprintf("%s=%s", k, v))
+	}
+	return strings.Join(parts, ",")

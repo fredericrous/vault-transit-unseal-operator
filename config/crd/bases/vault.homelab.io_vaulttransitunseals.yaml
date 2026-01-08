@@ -123,11 +123,6 @@ spec:
                     description: Token recovery configuration for disaster recovery
                       scenarios
                     properties:
-                      autoGenerate:
-                        default: true
-                        description: Automatically generate new admin token if missing
-                          during recovery
-                        type: boolean
                       backupToTransit:
                         default: true
                         description: Backup admin tokens to transit vault KV for recovery

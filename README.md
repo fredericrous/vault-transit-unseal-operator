@@ -113,9 +113,8 @@ spec:
   initialization:
     # Token recovery configuration (v1.6.0+)
     tokenRecovery:
-      enabled: true         # Enable automatic recovery
+      enabled: true         # Enable token recovery features
       backupToTransit: true # Backup tokens to transit vault
-      autoGenerate: true    # Generate new tokens if backup missing
   postUnsealConfig:
     enableKV: true
     enableExternalSecretsOperator: true
@@ -254,9 +253,8 @@ spec:
     recoveryThreshold: 3
     # Token recovery configuration (v1.6.0+)
     tokenRecovery:
-      enabled: true         # Enable automatic recovery
+      enabled: true         # Enable token recovery features
       backupToTransit: true # Backup tokens to transit vault
-      autoGenerate: true    # Generate new tokens if backup missing
     secretNames:
       storeRecoveryKeys: false  # Production: keys only in logs
       adminTokenAnnotations:
@@ -292,11 +290,30 @@ spec:
 - **Production**: Keep `storeRecoveryKeys: false` and capture keys from logs
 - **Development**: Set `storeRecoveryKeys: true` for convenience
 - **Token Rotation**: Implement regular transit token rotation
+- **Root Token Security**: The operator never automatically generates root tokens, following HashiCorp's security best practices
 
 ### Created Secrets
 
-- `vault-admin-token`: Root token for Vault admin access
+- `vault-admin-token`: Admin token for Vault access (or placeholder with recovery instructions if missing)
 - `vault-keys`: Recovery keys (only if `storeRecoveryKeys: true`)
+
+## Manual Token Recovery
+
+If the admin token is lost or missing, the operator will create a placeholder secret with detailed recovery instructions. To view the instructions:
+
+```bash
+# View recovery instructions
+kubectl get secret vault-admin-token -n vault -o jsonpath='{.data.recovery-instructions\.txt}' | base64 -d
+```
+
+The instructions will guide you through:
+1. Retrieving recovery keys from Kubernetes or secure storage
+2. Using `vault operator generate-root` to create a new root token
+3. Creating a scoped admin token (recommended over using root directly)
+4. Updating the Kubernetes secret
+5. Revoking the root token for security
+
+**Important**: Following HashiCorp's security best practices, the operator will never automatically generate root tokens. Manual intervention ensures proper oversight and immediate revocation of root tokens after use.
 
 ## Troubleshooting
 
