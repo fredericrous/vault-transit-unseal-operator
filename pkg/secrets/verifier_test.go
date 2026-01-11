@@ -327,9 +327,8 @@ func TestGetExpectedSecrets(t *testing.T) {
 	for _, exp := range expected {
 		if exp.Name == "vault-recovery-keys" {
 			recoveryKeysFound = true
-			// Should have root-token + 5 recovery keys
-			assert.Len(t, exp.Keys, 6)
-			assert.Contains(t, exp.Keys, "root-token")
+			// Should have 5 recovery keys (root-token is stored in admin token secret)
+			assert.Len(t, exp.Keys, 5)
 			for i := 0; i < 5; i++ {
 				assert.Contains(t, exp.Keys, fmt.Sprintf("recovery-key-%d", i))
 			}

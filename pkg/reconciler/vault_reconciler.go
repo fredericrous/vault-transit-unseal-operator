@@ -167,6 +167,12 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *vaultv1alpha1.VaultTransitUnseal) error {
 	log := r.Log.WithValues("pod", pod.Name, "namespace", pod.Namespace)
 
+	// Skip pods that don't have a vault container (e.g., vault-agent-injector)
+	if !r.hasVaultContainer(pod) {
+		log.V(1).Info("Skipping pod without vault container")
+		return nil
+	}
+
 	if !r.isPodReady(pod) {
 		log.V(1).Info("Pod not ready, waiting for vault container to start")
 		return fmt.Errorf("pod not running (waiting for vault container to start)")
@@ -412,6 +418,16 @@ func (r *VaultReconciler) StoreSecrets(ctx context.Context, vtu *vaultv1alpha1.V
 	}
 
 	return nil
+}
+
+// hasVaultContainer checks if a pod has a container named "vault"
+func (r *VaultReconciler) hasVaultContainer(pod *corev1.Pod) bool {
+	for _, c := range pod.Spec.Containers {
+		if c.Name == "vault" {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *VaultReconciler) isPodReady(pod *corev1.Pod) bool {

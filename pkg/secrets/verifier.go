@@ -228,8 +228,10 @@ func (v *Verifier) getExpectedSecrets(vtu *vaultv1alpha1.VaultTransitUnseal) []E
 }
 
 // getRecoveryKeyNames generates the expected recovery key names
+// Note: root-token is NOT expected in recovery keys secret since it's stored
+// in a separate admin token secret (vault-admin-token)
 func (v *Verifier) getRecoveryKeyNames(recoveryShares int) []string {
-	keys := []string{"root-token"}
+	keys := []string{}
 	for i := 0; i < recoveryShares; i++ {
 		keys = append(keys, fmt.Sprintf("recovery-key-%d", i))
 	}

@@ -235,6 +235,14 @@ func createReadyPod(name, namespace string, labels map[string]string) *corev1.Po
 			Namespace: namespace,
 			Labels:    labels,
 		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "vault",
+					Image: "hashicorp/vault:1.15.0",
+				},
+			},
+		},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,
 			ContainerStatuses: []corev1.ContainerStatus{
