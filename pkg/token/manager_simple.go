@@ -399,9 +399,33 @@ func (m *SimpleManager) CreateScopedTokenFromRoot(ctx context.Context, vtu *vaul
 
 	newToken := resp.Auth.ClientToken
 
-	// Revoke the root token now that we have the scoped token
+	// CRITICAL: Validate the scoped token works before revoking root token
+	// Create a new client with the scoped token and verify it can authenticate
+	testClient, err := m.VaultFactory.NewClientForPod(ctx, &pods[0], vtu)
+	if err != nil {
+		m.Log.Error(err, "Failed to create test client for token validation, keeping root token")
+		return "", fmt.Errorf("failed to create test client for token validation: %w", err)
+	}
+	testAPIClient := testClient.GetAPIClient()
+	testAPIClient.SetToken(newToken)
+
+	// Validate the scoped token by looking up its own info
+	tokenInfo, err := testAPIClient.Auth().Token().LookupSelf()
+	if err != nil {
+		m.Log.Error(err, "Scoped token validation failed - token cannot authenticate, keeping root token")
+		return "", fmt.Errorf("scoped token validation failed: %w", err)
+	}
+
+	// Also validate the token has the expected policies
+	if tokenInfo == nil || tokenInfo.Data == nil {
+		m.Log.Error(nil, "Scoped token validation returned empty data, keeping root token")
+		return "", fmt.Errorf("scoped token validation returned empty data")
+	}
+	m.Log.Info("Scoped token validated successfully", "accessor", tokenInfo.Data["accessor"])
+
+	// Only revoke the root token after successful validation
 	if err := apiClient.Auth().Token().RevokeSelf(rootToken); err != nil {
-		// Log the error but don't fail - we have the new token
+		// Log the error but don't fail - we have validated the new token works
 		m.Log.Error(err, "Failed to revoke root token after creating scoped token")
 	} else {
 		m.Log.Info("Successfully revoked root token after creating scoped token")
