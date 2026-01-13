@@ -120,7 +120,7 @@ func (r *RecoveryManager) recoverMissingSecret(ctx context.Context, vtu *vaultv1
 		return r.recoverAdminToken(ctx, vtu, action, vaultClient)
 
 	case vtu.Spec.Initialization.SecretNames.RecoveryKeys:
-		return r.recoverRecoveryKeys(ctx, vtu, action)
+		return r.recoverRecoveryKeys(ctx, vtu, action, vaultClient)
 
 	default:
 		return fmt.Errorf("unknown secret type for recovery: %s", action.SecretName)
@@ -175,12 +175,20 @@ func (r *RecoveryManager) recoverAdminToken(ctx context.Context, vtu *vaultv1alp
 	// Check if Vault is initialized and unsealed
 	status, err := vaultClient.CheckStatus(ctx)
 	if err != nil {
-		return fmt.Errorf("checking vault status: %w", err)
+		// On a fresh install, Vault isn't running yet - this is expected
+		// Don't fail recovery, just skip it - the token will be created during initialization
+		r.Log.Info("Cannot check Vault status (likely fresh install), skipping admin token recovery",
+			"error", err.Error())
+		return nil
 	}
 
 	if !status.Initialized || status.Sealed {
-		return r.createRecoveryPlaceholder(ctx, vtu, action,
-			"Cannot recover admin token: vault is not initialized or is sealed")
+		// On fresh install, Vault is not initialized yet - admin token will be created during initialization
+		// Don't create a placeholder, just skip - initialization will handle this
+		r.Log.Info("Vault is not initialized or is sealed, skipping admin token recovery (will be created during initialization)",
+			"initialized", status.Initialized,
+			"sealed", status.Sealed)
+		return nil
 	}
 
 	// Step 1: Try to recover from transit vault backup if enabled
@@ -291,8 +299,25 @@ If recovery keys are not available in Kubernetes, you will need to retrieve them
 }
 
 // recoverRecoveryKeys attempts to recover recovery keys
-func (r *RecoveryManager) recoverRecoveryKeys(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, action RecoveryAction) error {
-	// Recovery keys cannot be recovered if lost
+func (r *RecoveryManager) recoverRecoveryKeys(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, action RecoveryAction, vaultClient vault.Client) error {
+	// First check if this is a fresh install (Vault not initialized)
+	// In that case, recovery keys will be created during initialization - don't fail
+	if vaultClient != nil {
+		status, err := vaultClient.CheckStatus(ctx)
+		if err != nil {
+			// Vault not reachable - likely fresh install, skip recovery
+			r.Log.Info("Cannot check Vault status (likely fresh install), skipping recovery keys recovery",
+				"error", err.Error())
+			return nil
+		}
+		if !status.Initialized {
+			// Fresh install - recovery keys will be created during initialization
+			r.Log.Info("Vault is not initialized, skipping recovery keys recovery (will be created during initialization)")
+			return nil
+		}
+	}
+
+	// Recovery keys cannot be recovered if lost (only applies to already-initialized Vault)
 	r.Log.Error(nil, "Recovery keys are missing and cannot be automatically recovered",
 		"namespace", action.Namespace,
 		"name", action.SecretName,
