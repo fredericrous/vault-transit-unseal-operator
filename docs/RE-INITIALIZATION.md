@@ -96,7 +96,7 @@ kubectl apply -f your-vault-transit-unseal.yaml
 
 2. If recovery keys are stored (not recommended for production):
    ```bash
-   kubectl get secret vault-recovery-keys -n vault -o yaml
+   kubectl get secret vault-keys -n vault -o yaml
    ```
 
 3. Generate a new root token using recovery keys:

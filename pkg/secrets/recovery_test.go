@@ -265,7 +265,7 @@ func TestRecoverSecrets(t *testing.T) {
 					},
 					Initialization: vaultv1alpha1.InitializationSpec{
 						SecretNames: vaultv1alpha1.SecretNamesSpec{
-							RecoveryKeys: "vault-recovery-keys",
+							RecoveryKeys: "vault-keys",
 						},
 					},
 				},
@@ -274,16 +274,16 @@ func TestRecoverSecrets(t *testing.T) {
 				AllPresent: false,
 				Missing: []MissingSecret{
 					{
-						Name:      "vault-recovery-keys",
+						Name:      "vault-keys",
 						Namespace: "vault",
 					},
 				},
 				RecoveryPlan: []RecoveryAction{
 					{
 						Type:        "create",
-						SecretName:  "vault-recovery-keys",
+						SecretName:  "vault-keys",
 						Namespace:   "vault",
-						Description: "Create missing secret vault/vault-recovery-keys",
+						Description: "Create missing secret vault/vault-keys",
 					},
 				},
 			},
@@ -292,7 +292,7 @@ func TestRecoverSecrets(t *testing.T) {
 				sealed:      false,
 			},
 			expectError:    false, // Recovery keys create placeholder, no error
-			checkSecret:    "vault-recovery-keys",
+			checkSecret:    "vault-keys",
 			checkNamespace: "vault",
 		},
 	}

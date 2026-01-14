@@ -2,7 +2,9 @@ package token
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -62,15 +64,21 @@ func (m *SimpleManager) ReconcileInitialToken(ctx context.Context, vtu *vaultv1a
 	}
 
 	// Check if initial token already exists
-	exists, needsReplacement, err := m.checkTokenStatus(ctx, vtu)
+	exists, needsReplacement, invalidToken, err := m.checkTokenStatus(ctx, vtu, vaultClient)
 	if err != nil {
 		return err
 	}
 
-	if exists && !needsReplacement {
+	if exists && !needsReplacement && !invalidToken {
 		// Token already exists and doesn't need replacement - Kyverno will handle lifecycle
 		m.Log.V(1).Info("Admin token already exists, lifecycle managed by Kyverno")
 		return nil
+	}
+
+	// If token is invalid/placeholder, try to regenerate
+	if invalidToken {
+		m.Log.Info("Admin token is invalid or placeholder, regenerating")
+		return m.replaceInvalidToken(ctx, vtu)
 	}
 
 	// If token needs replacement (root token stored during init), create scoped token
@@ -329,8 +337,9 @@ func (m *SimpleManager) checkDependencies(ctx context.Context, vtu *vaultv1alpha
 	return true, nil
 }
 
-// CreateScopedTokenFromRoot creates a scoped admin token from a root token and revokes the root token
-func (m *SimpleManager) CreateScopedTokenFromRoot(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, rootToken string) (string, error) {
+// CreateScopedTokenFromRoot creates a scoped admin token from a root token.
+// When revokeAfterUse is true, the root token is revoked after the scoped token is validated.
+func (m *SimpleManager) CreateScopedTokenFromRoot(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, rootToken string, revokeAfterUse bool) (string, error) {
 	m.Log.Info("Creating scoped admin token from root token")
 
 	// Check if TokenManagement is configured and enabled
@@ -423,12 +432,14 @@ func (m *SimpleManager) CreateScopedTokenFromRoot(ctx context.Context, vtu *vaul
 	}
 	m.Log.Info("Scoped token validated successfully", "accessor", tokenInfo.Data["accessor"])
 
-	// Only revoke the root token after successful validation
-	if err := apiClient.Auth().Token().RevokeSelf(rootToken); err != nil {
-		// Log the error but don't fail - we have validated the new token works
-		m.Log.Error(err, "Failed to revoke root token after creating scoped token")
-	} else {
-		m.Log.Info("Successfully revoked root token after creating scoped token")
+	// Only revoke the root token after successful validation when requested.
+	if revokeAfterUse {
+		if err := apiClient.Auth().Token().RevokeSelf(rootToken); err != nil {
+			// Log the error but don't fail - we have validated the new token works
+			m.Log.Error(err, "Failed to revoke root token after creating scoped token")
+		} else {
+			m.Log.Info("Successfully revoked root token after creating scoped token")
+		}
 	}
 
 	m.Log.Info("Successfully created scoped admin token",
@@ -439,8 +450,8 @@ func (m *SimpleManager) CreateScopedTokenFromRoot(ctx context.Context, vtu *vaul
 	return newToken, nil
 }
 
-// checkTokenStatus checks if the admin token exists and if it needs replacement
-func (m *SimpleManager) checkTokenStatus(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) (exists bool, needsReplacement bool, err error) {
+// checkTokenStatus checks if the admin token exists, if it needs replacement, and if it is valid
+func (m *SimpleManager) checkTokenStatus(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, vaultClient *vaultapi.Client) (exists bool, needsReplacement bool, invalidToken bool, err error) {
 	secret := &corev1.Secret{}
 	err = m.Get(ctx, client.ObjectKey{
 		Namespace: vtu.Spec.VaultPod.Namespace,
@@ -449,9 +460,9 @@ func (m *SimpleManager) checkTokenStatus(ctx context.Context, vtu *vaultv1alpha1
 
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return false, false, nil
+			return false, false, false, nil
 		}
-		return false, false, err
+		return false, false, false, err
 	}
 
 	// Token exists
@@ -467,7 +478,190 @@ func (m *SimpleManager) checkTokenStatus(ctx context.Context, vtu *vaultv1alpha1
 		}
 	}
 
-	return exists, needsReplacement, nil
+	token, hasToken := secret.Data["token"]
+	if !hasToken || len(token) == 0 {
+		return exists, needsReplacement, true, nil
+	}
+
+	tokenStr := strings.TrimSpace(string(token))
+	if m.isPlaceholderToken(secret, tokenStr) {
+		return exists, needsReplacement, true, nil
+	}
+
+	if vaultClient == nil {
+		return exists, needsReplacement, false, nil
+	}
+
+	// Validate token via lookup to catch revoked/invalid tokens.
+	originalToken := vaultClient.Token()
+	vaultClient.SetToken(tokenStr)
+	_, lookupErr := vaultClient.Auth().Token().LookupSelf()
+	vaultClient.SetToken(originalToken)
+	if lookupErr != nil {
+		if m.isAuthError(lookupErr) {
+			return exists, needsReplacement, true, nil
+		}
+		m.Log.V(1).Info("Token lookup failed; treating as transient", "error", lookupErr)
+		return exists, needsReplacement, false, lookupErr
+	}
+
+	return exists, needsReplacement, false, nil
+}
+
+func (m *SimpleManager) isAuthError(err error) bool {
+	var respErr *vaultapi.ResponseError
+	if errors.As(err, &respErr) {
+		switch respErr.StatusCode {
+		case 400, 401, 403:
+			return true
+		}
+	}
+
+	errStr := strings.ToLower(err.Error())
+	if strings.Contains(errStr, "permission denied") ||
+		strings.Contains(errStr, "invalid token") {
+		return true
+	}
+
+	return false
+}
+
+func (m *SimpleManager) isPlaceholderToken(secret *corev1.Secret, token string) bool {
+	if secret.Annotations != nil {
+		if _, hasRecoveryRequired := secret.Annotations["vault.homelab.io/recovery-required"]; hasRecoveryRequired {
+			return true
+		}
+		if _, hasIncomplete := secret.Annotations["vault.homelab.io/incomplete"]; hasIncomplete {
+			return true
+		}
+	}
+
+	if strings.Contains(token, "PLACEHOLDER") ||
+		strings.HasPrefix(token, "placeholder-") ||
+		strings.HasPrefix(token, "temp-") ||
+		strings.HasPrefix(token, "incomplete-") ||
+		strings.HasPrefix(token, "RECOVERY-REQUIRED:") ||
+		token == "" ||
+		token == "null" ||
+		token == "undefined" ||
+		len(token) < 10 {
+		return true
+	}
+
+	return false
+}
+
+func (m *SimpleManager) replaceInvalidToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) error {
+	if !vtu.Spec.Initialization.SecretNames.StoreRecoveryKeys {
+		return fmt.Errorf("admin token invalid and recovery keys are not stored")
+	}
+
+	recoverySecret := &corev1.Secret{}
+	err := m.Get(ctx, client.ObjectKey{
+		Namespace: vtu.Spec.VaultPod.Namespace,
+		Name:      vtu.Spec.Initialization.SecretNames.RecoveryKeys,
+	}, recoverySecret)
+	if err != nil {
+		return fmt.Errorf("failed to get recovery keys secret: %w", err)
+	}
+
+	rootToken, ok := recoverySecret.Data["root-token"]
+	if !ok || len(rootToken) == 0 {
+		return fmt.Errorf("recovery keys secret missing root-token")
+	}
+
+	scopedToken, err := m.CreateScopedTokenFromRoot(ctx, vtu, strings.TrimSpace(string(rootToken)), false)
+	if err != nil {
+		return fmt.Errorf("failed to create scoped token from root token: %w", err)
+	}
+
+	secret := &corev1.Secret{}
+	err = m.Get(ctx, client.ObjectKey{
+		Namespace: vtu.Spec.VaultPod.Namespace,
+		Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
+	}, secret)
+	if err != nil {
+		return fmt.Errorf("failed to get admin token secret: %w", err)
+	}
+
+	if secret.Data == nil {
+		secret.Data = map[string][]byte{}
+	}
+	secret.Data["token"] = []byte(scopedToken)
+
+	if secret.Annotations == nil {
+		secret.Annotations = make(map[string]string)
+	}
+	delete(secret.Annotations, "vault.homelab.io/recovery-required")
+	delete(secret.Annotations, "vault.homelab.io/incomplete")
+	delete(secret.Annotations, "vault.homelab.io/root-token")
+	delete(secret.Annotations, "vault.homelab.io/needs-replacement")
+	delete(secret.Annotations, "vault.homelab.io/recovery-reason")
+	delete(secret.Annotations, "vault.homelab.io/recovery-time")
+	secret.Annotations["vault.homelab.io/scoped-token"] = "true"
+	secret.Annotations["vault.homelab.io/replaced-at"] = time.Now().Format(time.RFC3339)
+	secret.Annotations["vault.homelab.io/token-created"] = time.Now().Format(time.RFC3339)
+	secret.Annotations["vault.homelab.io/token-ttl"] = vtu.Spec.TokenManagement.TTL
+	secret.Annotations["vault.homelab.io/token-policies"] = vtu.Spec.TokenManagement.PolicyName
+
+	if vtu.Spec.TokenManagement.AutoRenew {
+		secret.Annotations["vault.homelab.io/auto-renew"] = "true"
+	}
+
+	if vtu.Spec.TokenManagement.AutoRotate {
+		secret.Annotations["vault.homelab.io/auto-rotate"] = "true"
+		secret.Annotations["vault.homelab.io/rotation-period"] = vtu.Spec.TokenManagement.RotationPeriod
+	}
+
+	if err := m.Update(ctx, secret); err != nil {
+		return fmt.Errorf("failed to update admin token secret: %w", err)
+	}
+
+	m.Log.Info("Successfully replaced invalid admin token with new scoped token")
+	vtu.Status.TokenStatus.State = vaultv1alpha1.TokenStateActive
+	vtu.Status.TokenStatus.LastRenewedAt = time.Now().Format(time.RFC3339)
+	if accessor, err := m.lookupTokenAccessor(ctx, vtu, scopedToken); err != nil {
+		m.Log.V(1).Info("Failed to lookup accessor for regenerated token", "error", err)
+	} else if accessor != "" {
+		vtu.Status.TokenStatus.Accessor = accessor
+	}
+
+	return nil
+}
+
+func (m *SimpleManager) lookupTokenAccessor(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, token string) (string, error) {
+	pods, err := m.getVaultPods(ctx, &vtu.Spec.VaultPod)
+	if err != nil {
+		return "", fmt.Errorf("getting vault pods: %w", err)
+	}
+	if len(pods) == 0 {
+		return "", fmt.Errorf("no vault pods found")
+	}
+
+	vaultClient, err := m.VaultFactory.NewClientForPod(ctx, &pods[0], vtu)
+	if err != nil {
+		return "", fmt.Errorf("creating vault client with factory: %w", err)
+	}
+
+	apiClient := vaultClient.GetAPIClient()
+	if apiClient == nil {
+		return "", fmt.Errorf("vault client has no API client")
+	}
+
+	apiClient.SetToken(token)
+	tokenInfo, err := apiClient.Auth().Token().LookupSelf()
+	if err != nil {
+		return "", fmt.Errorf("looking up token accessor: %w", err)
+	}
+	if tokenInfo == nil || tokenInfo.Data == nil {
+		return "", fmt.Errorf("token lookup returned empty data")
+	}
+	accessor, ok := tokenInfo.Data["accessor"].(string)
+	if !ok || accessor == "" {
+		return "", fmt.Errorf("token accessor missing from lookup response")
+	}
+
+	return accessor, nil
 }
 
 // replaceRootToken replaces a root token with a scoped admin token
@@ -489,7 +683,7 @@ func (m *SimpleManager) replaceRootToken(ctx context.Context, vtu *vaultv1alpha1
 	}
 
 	// Create scoped token from root
-	scopedToken, err := m.CreateScopedTokenFromRoot(ctx, vtu, rootToken)
+	scopedToken, err := m.CreateScopedTokenFromRoot(ctx, vtu, rootToken, true)
 	if err != nil {
 		return fmt.Errorf("failed to create scoped token: %w", err)
 	}

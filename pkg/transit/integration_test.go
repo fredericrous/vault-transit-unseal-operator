@@ -225,7 +225,7 @@ var _ = Describe("Transit Client Integration Tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying encrypted key is stored securely")
-			// In real scenario: kubectl get secret vault-recovery-keys -o yaml
+			// In real scenario: kubectl get secret vault-keys -o yaml
 			Expect(encryptedKey).To(HavePrefix("vault:v1:"))
 
 			By("Simulating automatic unseal on vault restart")

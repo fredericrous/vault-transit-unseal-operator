@@ -182,7 +182,7 @@ func TestVerifyExpectedSecrets(t *testing.T) {
 						RecoveryThreshold: 2,
 						SecretNames: vaultv1alpha1.SecretNamesSpec{
 							AdminToken:        "vault-admin-token",
-							RecoveryKeys:      "vault-recovery-keys",
+							RecoveryKeys:      "vault-keys",
 							StoreRecoveryKeys: true,
 						},
 					},
@@ -209,7 +209,7 @@ func TestVerifyExpectedSecrets(t *testing.T) {
 				},
 				&corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "vault-recovery-keys",
+						Name:      "vault-keys",
 						Namespace: "vault",
 					},
 					Data: map[string][]byte{
@@ -288,7 +288,7 @@ func TestGetExpectedSecrets(t *testing.T) {
 				RecoveryShares: 5,
 				SecretNames: vaultv1alpha1.SecretNamesSpec{
 					AdminToken:        "vault-admin-token",
-					RecoveryKeys:      "vault-recovery-keys",
+					RecoveryKeys:      "vault-keys",
 					StoreRecoveryKeys: true,
 				},
 			},
@@ -325,7 +325,7 @@ func TestGetExpectedSecrets(t *testing.T) {
 	// Check recovery keys
 	recoveryKeysFound := false
 	for _, exp := range expected {
-		if exp.Name == "vault-recovery-keys" {
+		if exp.Name == "vault-keys" {
 			recoveryKeysFound = true
 			// Should have 5 recovery keys (root-token is stored in admin token secret)
 			assert.Len(t, exp.Keys, 5)

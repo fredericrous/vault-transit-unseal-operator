@@ -294,7 +294,7 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 		}
 
 		// Then apply post-unseal configuration if needed
-		if (vtu.Spec.PostUnsealConfig.EnableKV || vtu.Spec.PostUnsealConfig.EnableExternalSecretsOperator) && r.Configurator != nil {
+		if (vtu.Spec.PostUnsealConfig.EnableKV || vtu.Spec.PostUnsealConfig.EnableExternalSecretsOperator || vtu.Spec.PostUnsealConfig.EnableVaultConfigOperatorBootstrap) && r.Configurator != nil {
 			log := r.Log.WithValues("pod", pod.Name)
 			log.V(1).Info("Applying post-unseal configuration")
 

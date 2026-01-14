@@ -24,7 +24,7 @@ import (
 
 // TokenManager interface for creating scoped tokens
 type TokenManager interface {
-	CreateScopedTokenFromRoot(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, rootToken string) (string, error)
+	CreateScopedTokenFromRoot(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, rootToken string, revokeAfterUse bool) (string, error)
 }
 
 // RecoveryManager handles recovery of missing secrets
@@ -212,7 +212,7 @@ func (r *RecoveryManager) recoverAdminToken(ctx context.Context, vtu *vaultv1alp
 				}
 				if isRoot {
 					r.Log.Info("Recovered token is root, creating scoped token")
-					scopedToken, err := r.tokenManager.CreateScopedTokenFromRoot(ctx, vtu, token)
+					scopedToken, err := r.tokenManager.CreateScopedTokenFromRoot(ctx, vtu, token, false)
 					if err != nil {
 						r.Log.Error(err, "Failed to create scoped token from recovered root token")
 						// Fall back to using the root token

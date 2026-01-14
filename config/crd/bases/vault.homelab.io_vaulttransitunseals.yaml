@@ -155,11 +155,21 @@ spec:
                 properties:
                   enableExternalSecretsOperator:
                     default: true
-                    description: Enable External Secrets Operator configuration
+                    description: |-
+                      Enable External Secrets Operator configuration
+                      This creates kubernetes auth, ESO policy and role
+                      Set to false if vault-config-operator manages ESO via GitOps
                     type: boolean
                   enableKV:
                     default: true
                     description: Enable KV v2 secret engine
+                    type: boolean
+                  enableVaultConfigOperatorBootstrap:
+                    default: false
+                    description: |-
+                      Enable minimal bootstrap for vault-config-operator
+                      This ONLY enables kubernetes auth and creates controller-manager role
+                      Use this when vault-config-operator manages all other Vault config via GitOps
                     type: boolean
                   externalSecretsOperatorConfig:
                     description: External Secrets Operator configuration
@@ -490,6 +500,12 @@ spec:
                     type: boolean
                   kvConfiguredTime:
                     description: Last time KV was configured
+                    type: string
+                  vaultConfigOperatorBootstrapped:
+                    description: vault-config-operator bootstrap configured
+                    type: boolean
+                  vaultConfigOperatorBootstrappedTime:
+                    description: Last time vault-config-operator bootstrap was configured
                     type: string
                 type: object
               initialized:

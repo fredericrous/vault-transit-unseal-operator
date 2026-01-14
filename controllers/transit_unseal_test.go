@@ -229,7 +229,7 @@ func TestHomelabScenario(t *testing.T) {
 				RecoveryThreshold: 3,
 				SecretNames: vaultv1alpha1.SecretNamesSpec{
 					AdminToken:   "vault-admin-token",
-					RecoveryKeys: "vault-recovery-keys",
+					RecoveryKeys: "vault-keys",
 				},
 			},
 			Monitoring: vaultv1alpha1.MonitoringSpec{

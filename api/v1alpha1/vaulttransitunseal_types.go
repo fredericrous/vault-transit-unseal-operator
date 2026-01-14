@@ -190,8 +190,16 @@ type PostUnsealConfig struct {
 	EnableKV bool `json:"enableKV,omitempty"`
 
 	// Enable External Secrets Operator configuration
+	// This creates kubernetes auth, ESO policy and role
+	// Set to false if vault-config-operator manages ESO via GitOps
 	// +kubebuilder:default=true
 	EnableExternalSecretsOperator bool `json:"enableExternalSecretsOperator,omitempty"`
+
+	// Enable minimal bootstrap for vault-config-operator
+	// This ONLY enables kubernetes auth and creates controller-manager role
+	// Use this when vault-config-operator manages all other Vault config via GitOps
+	// +kubebuilder:default=false
+	EnableVaultConfigOperatorBootstrap bool `json:"enableVaultConfigOperatorBootstrap,omitempty"`
 
 	// KV engine configuration
 	KVConfig KVConfig `json:"kvConfig,omitempty"`
@@ -454,6 +462,12 @@ type ConfigurationStatus struct {
 
 	// Last time ESO was configured
 	ExternalSecretsOperatorConfiguredTime string `json:"externalSecretsOperatorConfiguredTime,omitempty"`
+
+	// vault-config-operator bootstrap configured
+	VaultConfigOperatorBootstrapped bool `json:"vaultConfigOperatorBootstrapped,omitempty"`
+
+	// Last time vault-config-operator bootstrap was configured
+	VaultConfigOperatorBootstrappedTime string `json:"vaultConfigOperatorBootstrappedTime,omitempty"`
 }
 
 // TokenStatus tracks the state of managed tokens
