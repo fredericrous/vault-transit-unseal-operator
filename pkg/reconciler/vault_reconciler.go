@@ -291,7 +291,7 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 				// Check if this is a "manual recovery required" error
 				errMsg := err.Error()
 				if strings.Contains(errMsg, "Manual recovery required") ||
-				   strings.Contains(errMsg, "root token was previously revoked") {
+					strings.Contains(errMsg, "root token was previously revoked") {
 					vtu.Status.TokenStatus.State = vaultv1alpha1.TokenStateFailed
 					vtu.Status.TokenStatus.Error = errMsg
 					log.Info("Token requires manual recovery - status updated for bootstrap to read")

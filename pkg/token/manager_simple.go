@@ -569,7 +569,7 @@ func (m *SimpleManager) replaceInvalidToken(ctx context.Context, vtu *vaultv1alp
 	if recoverySecret.Annotations != nil {
 		if _, revoked := recoverySecret.Annotations["vault.homelab.io/root-token-revoked"]; revoked {
 			m.Log.Info("Root token was intentionally revoked. Manual recovery using recovery keys required.")
-			return fmt.Errorf("admin token is invalid and root token was previously revoked (this is expected). " +
+			return fmt.Errorf("admin token is invalid and root token was previously revoked (this is expected). "+
 				"Manual recovery required: use 'vault operator generate-root' with recovery keys from %s/%s to generate a new root token",
 				vtu.Spec.VaultPod.Namespace, vtu.Spec.Initialization.SecretNames.RecoveryKeys)
 		}
@@ -586,7 +586,7 @@ func (m *SimpleManager) replaceInvalidToken(ctx context.Context, vtu *vaultv1alp
 			}
 		}
 		if hasRecoveryKeys {
-			return fmt.Errorf("admin token is invalid and root token is not available. " +
+			return fmt.Errorf("admin token is invalid and root token is not available. "+
 				"Manual recovery required: use 'vault operator generate-root' with recovery keys from %s/%s",
 				vtu.Spec.VaultPod.Namespace, vtu.Spec.Initialization.SecretNames.RecoveryKeys)
 		}
