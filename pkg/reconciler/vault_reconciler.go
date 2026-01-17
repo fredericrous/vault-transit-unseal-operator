@@ -3,6 +3,7 @@ package reconciler
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -285,7 +286,18 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 			log.V(1).Info("Managing admin token")
 			if err := r.TokenManager.ReconcileInitialToken(ctx, vtu, vaultClient.GetAPIClient()); err != nil {
 				log.Error(err, "Failed to manage admin token")
-				// Don't fail the reconciliation, but record the event
+
+				// Update status so bootstrap can read the error
+				// Check if this is a "manual recovery required" error
+				errMsg := err.Error()
+				if strings.Contains(errMsg, "Manual recovery required") ||
+				   strings.Contains(errMsg, "root token was previously revoked") {
+					vtu.Status.TokenStatus.State = vaultv1alpha1.TokenStateFailed
+					vtu.Status.TokenStatus.Error = errMsg
+					log.Info("Token requires manual recovery - status updated for bootstrap to read")
+				}
+
+				// Record the event
 				if r.Recorder != nil {
 					r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "TokenManagementFailed",
 						"Failed to manage admin token: %v", err)

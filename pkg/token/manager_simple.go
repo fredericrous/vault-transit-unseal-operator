@@ -565,9 +565,32 @@ func (m *SimpleManager) replaceInvalidToken(ctx context.Context, vtu *vaultv1alp
 		return fmt.Errorf("failed to get recovery keys secret: %w", err)
 	}
 
+	// Check if root token was intentionally revoked (normal lifecycle after creating scoped token)
+	if recoverySecret.Annotations != nil {
+		if _, revoked := recoverySecret.Annotations["vault.homelab.io/root-token-revoked"]; revoked {
+			m.Log.Info("Root token was intentionally revoked. Manual recovery using recovery keys required.")
+			return fmt.Errorf("admin token is invalid and root token was previously revoked (this is expected). " +
+				"Manual recovery required: use 'vault operator generate-root' with recovery keys from %s/%s to generate a new root token",
+				vtu.Spec.VaultPod.Namespace, vtu.Spec.Initialization.SecretNames.RecoveryKeys)
+		}
+	}
+
 	rootToken, ok := recoverySecret.Data["root-token"]
 	if !ok || len(rootToken) == 0 {
-		return fmt.Errorf("recovery keys secret missing root-token")
+		// Root token is missing - check if recovery keys exist for manual recovery
+		hasRecoveryKeys := false
+		for key := range recoverySecret.Data {
+			if strings.HasPrefix(key, "recovery-key-") {
+				hasRecoveryKeys = true
+				break
+			}
+		}
+		if hasRecoveryKeys {
+			return fmt.Errorf("admin token is invalid and root token is not available. " +
+				"Manual recovery required: use 'vault operator generate-root' with recovery keys from %s/%s",
+				vtu.Spec.VaultPod.Namespace, vtu.Spec.Initialization.SecretNames.RecoveryKeys)
+		}
+		return fmt.Errorf("recovery keys secret missing root-token and no recovery keys found")
 	}
 
 	scopedToken, err := m.CreateScopedTokenFromRoot(ctx, vtu, strings.TrimSpace(string(rootToken)), false)
@@ -664,8 +687,25 @@ func (m *SimpleManager) lookupTokenAccessor(ctx context.Context, vtu *vaultv1alp
 	return accessor, nil
 }
 
-// replaceRootToken replaces a root token with a scoped admin token
+// replaceRootToken replaces a root token with a scoped admin token.
+// The root token is only revoked if the VaultTransitUnseal resource has the
+// "vault.homelab.io/bootstrap-complete" annotation set to "true".
+// This allows bootstrap to complete successfully before the root token is revoked,
+// ensuring automatic recovery is possible if something goes wrong during bootstrap.
 func (m *SimpleManager) replaceRootToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, vaultClient *vaultapi.Client) error {
+	// Check if bootstrap has signaled completion - only then should we revoke root token
+	bootstrapComplete := false
+	if vtu.Annotations != nil {
+		if val, ok := vtu.Annotations["vault.homelab.io/bootstrap-complete"]; ok && val == "true" {
+			bootstrapComplete = true
+			m.Log.Info("Bootstrap complete annotation found, will revoke root token after creating scoped token")
+		}
+	}
+
+	if !bootstrapComplete {
+		m.Log.Info("Bootstrap not yet complete, will keep root token for recovery purposes")
+	}
+
 	// Get the existing root token
 	secret := &corev1.Secret{}
 	err := m.Get(ctx, client.ObjectKey{
@@ -682,8 +722,8 @@ func (m *SimpleManager) replaceRootToken(ctx context.Context, vtu *vaultv1alpha1
 		return fmt.Errorf("admin token secret has empty token")
 	}
 
-	// Create scoped token from root
-	scopedToken, err := m.CreateScopedTokenFromRoot(ctx, vtu, rootToken, true)
+	// Create scoped token from root - only revoke if bootstrap is complete
+	scopedToken, err := m.CreateScopedTokenFromRoot(ctx, vtu, rootToken, bootstrapComplete)
 	if err != nil {
 		return fmt.Errorf("failed to create scoped token: %w", err)
 	}
@@ -719,12 +759,54 @@ func (m *SimpleManager) replaceRootToken(ctx context.Context, vtu *vaultv1alpha1
 		return fmt.Errorf("failed to update admin token secret: %w", err)
 	}
 
-	m.Log.Info("Successfully replaced root token with scoped token")
+	m.Log.Info("Successfully replaced root token with scoped token", "rootTokenRevoked", bootstrapComplete)
+
+	// Only mark root token as revoked if we actually revoked it
+	if bootstrapComplete {
+		if err := m.markRootTokenRevoked(ctx, vtu); err != nil {
+			m.Log.Error(err, "Failed to mark root token as revoked in vault-keys")
+			// Don't fail the operation - the scoped token was already created successfully
+		}
+	}
 
 	// Update status
 	vtu.Status.TokenStatus.State = vaultv1alpha1.TokenStateActive
 	vtu.Status.TokenStatus.LastRenewedAt = time.Now().Format(time.RFC3339)
 
+	return nil
+}
+
+// markRootTokenRevoked updates the vault-keys secret to indicate the root token has been revoked.
+// This is critical for recovery flows to know they cannot use the stored root-token.
+func (m *SimpleManager) markRootTokenRevoked(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) error {
+	if !vtu.Spec.Initialization.SecretNames.StoreRecoveryKeys {
+		return nil // vault-keys secret doesn't exist
+	}
+
+	keysSecret := &corev1.Secret{}
+	err := m.Get(ctx, client.ObjectKey{
+		Namespace: vtu.Spec.VaultPod.Namespace,
+		Name:      vtu.Spec.Initialization.SecretNames.RecoveryKeys,
+	}, keysSecret)
+	if err != nil {
+		return fmt.Errorf("failed to get vault-keys secret: %w", err)
+	}
+
+	// Remove the root-token since it's now revoked and unusable
+	delete(keysSecret.Data, "root-token")
+
+	// Add annotation to indicate root token was intentionally revoked
+	if keysSecret.Annotations == nil {
+		keysSecret.Annotations = make(map[string]string)
+	}
+	keysSecret.Annotations["vault.homelab.io/root-token-revoked"] = "true"
+	keysSecret.Annotations["vault.homelab.io/root-token-revoked-at"] = time.Now().Format(time.RFC3339)
+
+	if err := m.Update(ctx, keysSecret); err != nil {
+		return fmt.Errorf("failed to update vault-keys secret: %w", err)
+	}
+
+	m.Log.Info("Marked root token as revoked in vault-keys secret")
 	return nil
 }
 
