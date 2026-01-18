@@ -72,6 +72,11 @@ func (m *SimpleManager) ReconcileInitialToken(ctx context.Context, vtu *vaultv1a
 	if exists && !needsReplacement && !invalidToken {
 		// Token already exists and doesn't need replacement - Kyverno will handle lifecycle
 		m.Log.V(1).Info("Admin token already exists, lifecycle managed by Kyverno")
+		// Update status to reflect token is active
+		if vtu.Status.TokenStatus.State != vaultv1alpha1.TokenStateActive {
+			vtu.Status.TokenStatus.State = vaultv1alpha1.TokenStateActive
+			vtu.Status.TokenStatus.Initialized = true
+		}
 		return nil
 	}
 
