@@ -70,6 +70,11 @@ jobs:
           cp -v operator/config/crd/bases/vault.homelab.io_vaulttransitunseals.yaml \
                charts/charts/vault-transit-unseal-operator/crds/vault-transit-unseal-crd.yaml
 
+          # Verify the copy and show diff
+          cd charts
+          git diff --stat || true
+          git status
+
       - name: Update Chart.yaml
         id: update-chart
         run: |
@@ -186,6 +191,9 @@ jobs:
         with:
           token: ${{ secrets.CHARTS_REPO_TOKEN }}
           path: charts
+          add-paths: |
+            charts/vault-transit-unseal-operator/**
+            README.md
           commit-message: "chore: update vault-transit-unseal-operator to ${{ steps.version.outputs.version }}"
           title: "chore: update vault-transit-unseal-operator to ${{ steps.version.outputs.version }}"
           body: |
