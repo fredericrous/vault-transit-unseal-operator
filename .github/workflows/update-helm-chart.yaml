@@ -192,7 +192,7 @@ jobs:
           token: ${{ secrets.CHARTS_REPO_TOKEN }}
           path: charts
           add-paths: |
-            charts/vault-transit-unseal-operator/**
+            charts/${{ github.event.repository.name }}/**
             README.md
           commit-message: "chore: update vault-transit-unseal-operator to ${{ steps.version.outputs.version }}"
           title: "chore: update vault-transit-unseal-operator to ${{ steps.version.outputs.version }}"
