@@ -27,6 +27,14 @@ jobs:
     name: Update Helm Chart Version
     runs-on: ubuntu-latest
     steps:
+      - name: Check required secrets
+        run: |
+          if [ -z "${{ secrets.CHARTS_REPO_TOKEN }}" ]; then
+            echo "::error::CHARTS_REPO_TOKEN secret is not set. This secret is required to create PRs on the charts repository."
+            echo "::error::Please add a Personal Access Token with 'repo' scope as CHARTS_REPO_TOKEN in repository secrets."
+            exit 1
+          fi
+
       - name: Determine version
         id: version
         run: |
