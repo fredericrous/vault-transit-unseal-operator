@@ -206,7 +206,7 @@ jobs:
 
             ### Files Updated
             - `charts/vault-transit-unseal-operator/Chart.yaml` - Updated appVersion and chart version
-            - `charts/vault-transit-unseal-operator/crds/vault-transit-unseal-crd.yaml` - Synced CRD from operator
+            - `charts/vault-transit-unseal-operator/crds/*.yaml` - Synced all CRDs from operator
             - `README.md` - Updated chart version and app version in charts table
 
             ### What's Changed
