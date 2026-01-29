@@ -64,13 +64,26 @@ jobs:
           token: ${{ secrets.CHARTS_REPO_TOKEN }}
           path: charts
 
-      - name: Sync CRD from operator
+      - name: Sync CRDs and RBAC from operator
         run: |
-          echo "Syncing all CRDs from operator to chart..."
-          cp -v operator/config/crd/bases/*.yaml \
-               charts/charts/vault-transit-unseal-operator/crds/
+          CHART_NAME="${{ github.event.repository.name }}"
+          CHART_DIR="charts/charts/${CHART_NAME}"
 
-          # Verify the copy and show diff
+          echo "Syncing all CRDs from operator to chart..."
+          cp -v operator/config/crd/bases/*.yaml "${CHART_DIR}/crds/"
+
+          echo "Generating ClusterRole template from operator RBAC..."
+          cat > "${CHART_DIR}/templates/clusterrole.yaml" << EOF
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRole
+          metadata:
+            name: {{ include "${CHART_NAME}.fullname" . }}
+            labels:
+              {{- include "${CHART_NAME}.labels" . | nindent 4 }}
+          EOF
+          echo "rules:" >> "${CHART_DIR}/templates/clusterrole.yaml"
+          yq '.rules' operator/config/rbac/role.yaml | sed 's/^/  /' >> "${CHART_DIR}/templates/clusterrole.yaml"
+
           cd charts
           git diff --stat || true
           git status
@@ -207,6 +220,7 @@ jobs:
             ### Files Updated
             - `charts/vault-transit-unseal-operator/Chart.yaml` - Updated appVersion and chart version
             - `charts/vault-transit-unseal-operator/crds/*.yaml` - Synced all CRDs from operator
+            - `charts/vault-transit-unseal-operator/templates/clusterrole.yaml` - Synced RBAC rules from operator
             - `README.md` - Updated chart version and app version in charts table
 
             ### What's Changed
