@@ -14,7 +14,6 @@ jobs:
   trigger-chart-update:
     name: Trigger Chart Update
     runs-on: ubuntu-latest
-    # Use a PAT to ensure this workflow can run even if triggered by another workflow
     steps:
       - name: Get Release Version
         id: version
@@ -24,7 +23,7 @@ jobs:
           else
             VERSION="${{ inputs.tag }}"
           fi
-          
+
           # Remove v prefix if present
           VERSION="${VERSION#v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -32,30 +31,32 @@ jobs:
 
       - name: Trigger Helm Chart Update
         env:
-          CHARTS_TOKEN: ${{ secrets.CHARTS_REPO_TOKEN }}
+          WORKFLOW_TOKEN: ${{ secrets.WORKFLOW_TOKEN }}
         run: |
-          if [ -z "$CHARTS_TOKEN" ]; then
-            echo "::warning::CHARTS_REPO_TOKEN not set, skipping Helm chart update"
+          if [ -z "$WORKFLOW_TOKEN" ]; then
+            echo "::warning::WORKFLOW_TOKEN not set, skipping Helm chart update"
             exit 0
           fi
-          
+
           VERSION="${{ steps.version.outputs.version }}"
           echo "Triggering Helm chart update for version ${VERSION}"
-          
+
           RESPONSE=$(curl -X POST \
             -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Authorization: Bearer $WORKFLOW_TOKEN" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             https://api.github.com/repos/${{ github.repository }}/actions/workflows/update-helm-chart.yaml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"version\":\"${VERSION}\",\"bump_chart_version\":\"true\"}}" \
             -w "\nHTTP_STATUS:%{http_code}" \
             -s)
-          
+
           HTTP_STATUS=$(echo "$RESPONSE" | grep -o "HTTP_STATUS:[0-9]*" | cut -d: -f2)
           BODY=$(echo "$RESPONSE" | sed -n '1,/HTTP_STATUS:/p' | sed '$d')
-          
+
           if [ "$HTTP_STATUS" == "204" ]; then
-            echo "✅ Successfully triggered Helm chart update for version ${VERSION}"
+            echo "Successfully triggered Helm chart update for version ${VERSION}"
+          elif [ "$HTTP_STATUS" == "404" ]; then
+            echo "::warning::Helm chart update workflow not found, skipping"
           else
             echo "::error::Failed to trigger Helm chart update"
             echo "::error::HTTP Status: $HTTP_STATUS"
@@ -66,6 +67,4 @@ jobs:
       - name: Post Release Notifications
         if: success()
         run: |
-          echo "📦 Release v${{ steps.version.outputs.version }} published successfully"
-          echo "📊 Helm chart update triggered"
-          # Add any other post-release tasks here (notifications, webhooks, etc.)
+          echo "Release v${{ steps.version.outputs.version }} published successfully"

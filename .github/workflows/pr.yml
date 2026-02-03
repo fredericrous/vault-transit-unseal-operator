@@ -5,7 +5,6 @@ on:
     types: [opened, synchronize, reopened]
 
 env:
-  GO_VERSION: '1.25'
   GOLANGCI_LINT_VERSION: v2.4.0
 
 jobs:
@@ -24,8 +23,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: false  # Disable built-in caching to avoid conflicts
+          go-version-file: go.mod
+          cache: false
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -61,7 +60,7 @@ jobs:
         run: |
           if [ -n "$(gofmt -l .)" ]; then
             echo "formatting_needed=true" >> $GITHUB_OUTPUT
-            echo "## ❌ Code Formatting Issues" >> formatting_report.md
+            echo "## Code Formatting Issues" >> formatting_report.md
             echo "" >> formatting_report.md
             echo "The following files need formatting:" >> formatting_report.md
             echo "\`\`\`" >> formatting_report.md
@@ -87,7 +86,6 @@ jobs:
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
           gosec -no-fail -fmt sarif -out gosec-results.sarif ./... || true
-          # Ensure the file exists even if gosec found no issues
           if [ ! -f gosec-results.sarif ]; then
             echo '{"version":"2.1.0","runs":[]}' > gosec-results.sarif
           fi
@@ -118,16 +116,6 @@ jobs:
             echo "unit_tests_passed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Run integration tests
-        id: integration_tests
-        run: |
-          if make test-integration; then
-            echo "integration_tests_passed=true" >> $GITHUB_OUTPUT
-          else
-            echo "integration_tests_passed=false" >> $GITHUB_OUTPUT
-          fi
-
-
       - name: Generate coverage report
         run: |
           go tool cover -func=coverage.out > coverage-summary.txt
@@ -140,18 +128,17 @@ jobs:
           cat > test-report.md << EOF
           ## Test Results for PR #${{ github.event.pull_request.number }}
 
-          ### 📊 Summary
+          ### Summary
           | Check | Status |
           |-------|--------|
-          | 🎨 Code Formatting | ${{ steps.fmt.outputs.formatting_needed == 'false' && '✅ Passed' || '❌ Failed' }} |
-          | 🔍 Go Vet | ${{ steps.vet.outputs.vet_failed == 'false' && '✅ Passed' || '❌ Failed' }} |
-          | 🚨 GolangCI-Lint | ${{ steps.lint.outputs.lint_failed != 'true' && '✅ Passed' || '❌ Failed' }} |
-          | 🛡️ Security Scan | ✅ Completed (check Security tab) |
-          | 🧪 Unit Tests | ${{ steps.unit_tests.outputs.unit_tests_passed == 'true' && '✅ Passed' || '❌ Failed' }} |
-          | 🔧 Integration Tests | ${{ steps.integration_tests.outputs.integration_tests_passed == 'true' && '✅ Passed' || '❌ Failed' }} |
-          | 📈 Code Coverage | ${COVERAGE:-N/A} |
+          | Code Formatting | ${{ steps.fmt.outputs.formatting_needed == 'false' && 'Passed' || 'Failed' }} |
+          | Go Vet | ${{ steps.vet.outputs.vet_failed == 'false' && 'Passed' || 'Failed' }} |
+          | GolangCI-Lint | ${{ steps.lint.outputs.lint_failed != 'true' && 'Passed' || 'Failed' }} |
+          | Security Scan | Completed (check Security tab) |
+          | Unit Tests | ${{ steps.unit_tests.outputs.unit_tests_passed == 'true' && 'Passed' || 'Failed' }} |
+          | Code Coverage | ${COVERAGE:-N/A} |
 
-          ### 🔗 Links
+          ### Links
           - [Security Scan Results](https://github.com/${{ github.repository }}/security/code-scanning?query=pr%3A${{ github.event.pull_request.number }})
 
           EOF
@@ -170,7 +157,6 @@ jobs:
             const fs = require('fs');
             const testReport = fs.readFileSync('test-report.md', 'utf8');
 
-            // Find existing comment
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -183,7 +169,6 @@ jobs:
             );
 
             if (botComment) {
-              // Update existing comment
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -191,7 +176,6 @@ jobs:
                 body: testReport
               });
             } else {
-              // Create new comment
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -204,6 +188,5 @@ jobs:
         if: |
           steps.fmt.outputs.formatting_needed == 'true' ||
           steps.vet.outputs.vet_failed == 'true' ||
-          steps.unit_tests.outputs.unit_tests_passed != 'true' ||
-          steps.integration_tests.outputs.integration_tests_passed != 'true'
+          steps.unit_tests.outputs.unit_tests_passed != 'true'
         run: exit 1

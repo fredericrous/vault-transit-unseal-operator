@@ -33,8 +33,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
-          cache: false  # Disable built-in caching to avoid conflicts
+          go-version-file: go.mod
+          cache: false
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -94,24 +94,22 @@ jobs:
         id: release_notes
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          VERSION_TAG=$VERSION  # Keep the v-prefixed version for Git operations
-          VERSION_IMG=${VERSION#v}  # Remove v prefix for Docker image
+          VERSION_IMG=${VERSION#v}
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "VERSION_IMG=$VERSION_IMG" >> $GITHUB_OUTPUT
 
-          # Get previous tag
           PREV_TAG=$(git describe --tags --abbrev=0 $VERSION^ 2>/dev/null || echo "")
 
           if [ -n "$PREV_TAG" ]; then
-            echo "PREV_TAG=$PREV_TAG" >> $GITHUB_OUTPUT
             COMMITS=$(git log --pretty=format:"- %s" $PREV_TAG..$VERSION)
           else
             COMMITS=$(git log --pretty=format:"- %s")
           fi
 
-          # Create release notes
+          REPO_NAME=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+
           cat > release-notes.md << EOF
-          ## 🚀 Vault Operator $VERSION
+          ## ${REPO_NAME} $VERSION
 
           ### Docker Image
           \`\`\`bash
@@ -120,12 +118,9 @@ jobs:
 
           ### Installation
           \`\`\`bash
-          # Update kustomization.yaml
-          cd manifests/core/vault-transit-unseal-operator
-          kustomize edit set image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION_IMG
-
-          # Deploy
-          kubectl apply -k .
+          helm repo add fredericrous https://fredericrous.github.io/charts
+          helm repo update
+          helm install ${REPO_NAME} fredericrous/${REPO_NAME}
           \`\`\`
 
           ### What's Changed
@@ -143,7 +138,6 @@ jobs:
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
           generate_release_notes: true
 
-      # Trigger post-release workflow using PAT with workflow scope
       - name: Trigger Post-Release Workflow
         if: success()
         env:
@@ -174,7 +168,6 @@ jobs:
       - name: Extract version
         id: version
         run: |
-          # Remove 'v' prefix from tag
           VERSION=${GITHUB_REF_NAME#v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 

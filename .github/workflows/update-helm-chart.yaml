@@ -39,11 +39,9 @@ jobs:
         id: version
         run: |
           if [ "${{ github.event_name }}" == "release" ]; then
-            # Remove 'v' prefix from release tag
             VERSION="${{ github.event.release.tag_name }}"
             VERSION="${VERSION#v}"
           elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
-            # Get version from repository_dispatch payload
             VERSION="${{ github.event.client_payload.version }}"
             VERSION="${VERSION#v}"
           else
@@ -69,11 +67,17 @@ jobs:
           CHART_NAME="${{ github.event.repository.name }}"
           CHART_DIR="charts/charts/${CHART_NAME}"
 
-          echo "Syncing all CRDs from operator to chart..."
-          cp -v operator/config/crd/bases/*.yaml "${CHART_DIR}/crds/"
+          # Sync CRDs
+          if [ -d "operator/config/crd/bases" ]; then
+            echo "Syncing CRDs from operator to chart..."
+            mkdir -p "${CHART_DIR}/crds"
+            cp -v operator/config/crd/bases/*.yaml "${CHART_DIR}/crds/"
+          fi
 
-          echo "Generating ClusterRole template from operator RBAC..."
-          cat > "${CHART_DIR}/templates/clusterrole.yaml" << EOF
+          # Sync ClusterRole from operator RBAC
+          if [ -f "operator/config/rbac/role.yaml" ]; then
+            echo "Generating ClusterRole template from operator RBAC..."
+            cat > "${CHART_DIR}/templates/clusterrole.yaml" << EOF
           apiVersion: rbac.authorization.k8s.io/v1
           kind: ClusterRole
           metadata:
@@ -81,8 +85,9 @@ jobs:
             labels:
               {{- include "${CHART_NAME}.labels" . | nindent 4 }}
           EOF
-          echo "rules:" >> "${CHART_DIR}/templates/clusterrole.yaml"
-          yq '.rules' operator/config/rbac/role.yaml | sed 's/^/  /' >> "${CHART_DIR}/templates/clusterrole.yaml"
+            echo "rules:" >> "${CHART_DIR}/templates/clusterrole.yaml"
+            yq '.rules' operator/config/rbac/role.yaml | sed 's/^/  /' >> "${CHART_DIR}/templates/clusterrole.yaml"
+          fi
 
           cd charts
           git diff --stat || true
@@ -92,68 +97,32 @@ jobs:
         id: update-chart
         run: |
           cd charts
-          CHART_PATH="charts/vault-transit-unseal-operator/Chart.yaml"
+          CHART_NAME="${{ github.event.repository.name }}"
+          CHART_PATH="charts/${CHART_NAME}/Chart.yaml"
 
-          # Get current versions BEFORE making changes
+          if [ ! -f "$CHART_PATH" ]; then
+            echo "::error::Chart not found at $CHART_PATH"
+            exit 1
+          fi
+
           CURRENT_CHART_VERSION=$(yq '.version' "$CHART_PATH")
           CURRENT_APP_VERSION=$(yq '.appVersion' "$CHART_PATH")
-          NEW_APP_VERSION="${{ steps.version.outputs.version }}"
+          NEW_VERSION="${{ steps.version.outputs.version }}"
 
           echo "Current state:"
           echo "- Chart version: $CURRENT_CHART_VERSION"
-          echo "- App version: $CURRENT_APP_VERSION → $NEW_APP_VERSION"
+          echo "- App version: $CURRENT_APP_VERSION"
+          echo "New version: $NEW_VERSION (chart and app will be synced)"
 
-          # Update appVersion
-          yq -i ".appVersion = \"$NEW_APP_VERSION\"" "$CHART_PATH"
+          # Keep chart version = app version
+          yq -i ".version = \"$NEW_VERSION\"" "$CHART_PATH"
+          yq -i ".appVersion = \"$NEW_VERSION\"" "$CHART_PATH"
 
-          # Bump chart version if requested (default: true)
-          if [[ "${{ github.event.inputs.bump_chart_version }}" != "false" ]]; then
+          CHART_DESCRIPTION=$(yq '.description' "$CHART_PATH")
 
-            # Parse versions
-            IFS='.' read -r CHART_MAJOR CHART_MINOR CHART_PATCH <<< "$CURRENT_CHART_VERSION"
-            IFS='.' read -r OLD_APP_MAJOR OLD_APP_MINOR OLD_APP_PATCH <<< "${CURRENT_APP_VERSION#v}"
-            IFS='.' read -r NEW_APP_MAJOR NEW_APP_MINOR NEW_APP_PATCH <<< "${NEW_APP_VERSION#v}"
-
-            # Determine version bump type
-            BUMP_TYPE="${{ github.event.inputs.version_bump_type || 'auto' }}"
-
-            if [[ "$BUMP_TYPE" == "auto" ]]; then
-              # Auto-detect based on app version change
-              if [[ "$NEW_APP_MAJOR" -gt "$OLD_APP_MAJOR" ]]; then
-                # Major version change in app = major change in chart
-                echo "Detected major version change in app ($CURRENT_APP_VERSION → $NEW_APP_VERSION)"
-                NEW_CHART_VERSION="$((CHART_MAJOR + 1)).0.0"
-              elif [[ "$NEW_APP_MINOR" -gt "$OLD_APP_MINOR" ]]; then
-                # Minor version change in app = minor change in chart
-                echo "Detected minor version change in app ($CURRENT_APP_VERSION → $NEW_APP_VERSION)"
-                NEW_CHART_VERSION="$CHART_MAJOR.$((CHART_MINOR + 1)).0"
-              else
-                # Patch version change in app = patch change in chart
-                echo "Detected patch version change in app ($CURRENT_APP_VERSION → $NEW_APP_VERSION)"
-                NEW_CHART_VERSION="$CHART_MAJOR.$CHART_MINOR.$((CHART_PATCH + 1))"
-              fi
-            elif [[ "$BUMP_TYPE" == "major" ]]; then
-              echo "Forcing major version bump"
-              NEW_CHART_VERSION="$((CHART_MAJOR + 1)).0.0"
-            elif [[ "$BUMP_TYPE" == "minor" ]]; then
-              echo "Forcing minor version bump"
-              NEW_CHART_VERSION="$CHART_MAJOR.$((CHART_MINOR + 1)).0"
-            elif [[ "$BUMP_TYPE" == "patch" ]]; then
-              echo "Forcing patch version bump"
-              NEW_CHART_VERSION="$CHART_MAJOR.$CHART_MINOR.$((CHART_PATCH + 1))"
-            else
-              echo "Invalid version_bump_type: $BUMP_TYPE. Using patch bump."
-              NEW_CHART_VERSION="$CHART_MAJOR.$CHART_MINOR.$((CHART_PATCH + 1))"
-            fi
-
-            echo "Updating chart version: $CURRENT_CHART_VERSION → $NEW_CHART_VERSION"
-            yq -i ".version = \"$NEW_CHART_VERSION\"" "$CHART_PATH"
-            echo "chart_version=$NEW_CHART_VERSION" >> $GITHUB_OUTPUT
-            echo "version_bump_reason=$BUMP_TYPE" >> $GITHUB_OUTPUT
-          else
-            CHART_VERSION=$(yq '.version' "$CHART_PATH")
-            echo "chart_version=$CHART_VERSION" >> $GITHUB_OUTPUT
-          fi
+          echo "chart_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "chart_name=$CHART_NAME" >> $GITHUB_OUTPUT
+          echo "chart_description=$CHART_DESCRIPTION" >> $GITHUB_OUTPUT
 
           echo "Updated Chart.yaml:"
           cat "$CHART_PATH"
@@ -162,40 +131,24 @@ jobs:
         run: |
           cd charts
           README_FILE="README.md"
-          CHART_NAME="vault-transit-unseal-operator"
+          CHART_NAME="${{ steps.update-chart.outputs.chart_name }}"
           CHART_VERSION="${{ steps.update-chart.outputs.chart_version }}"
           APP_VERSION="${{ steps.version.outputs.version }}"
+          CHART_DESCRIPTION="${{ steps.update-chart.outputs.chart_description }}"
 
           if [ -f "$README_FILE" ]; then
-            # Update the chart table entry
-            # Format: | [chart-name](path/) | chart-version | app-version | description |
-
-            # Check if chart exists in the table
             if grep -q "\[${CHART_NAME}\]" "$README_FILE"; then
               echo "Updating existing chart entry in README.md"
-              # Create a temporary file with the updated content
               while IFS= read -r line; do
                 if [[ "$line" == *"[${CHART_NAME}]"* ]]; then
-                  # This is our chart's line - replace it
-                  echo "| [${CHART_NAME}](charts/${CHART_NAME}/) | ${CHART_VERSION} | ${APP_VERSION} | A Kubernetes operator that automatically manages HashiCorp Vault initialization and unsealing using transit unseal |"
+                  echo "| [${CHART_NAME}](charts/${CHART_NAME}/) | ${CHART_VERSION} | ${APP_VERSION} | ${CHART_DESCRIPTION} |"
                 else
                   echo "$line"
                 fi
               done < "$README_FILE" > "$README_FILE.tmp" && mv "$README_FILE.tmp" "$README_FILE"
             else
-              echo "Chart not found in README.md - skipping update"
-              echo "Manual intervention may be required to add the chart to README.md"
+              echo "Chart not found in README.md - manual intervention may be required"
             fi
-
-            echo "Updated README.md chart table:"
-            echo "- Chart version: $CHART_VERSION"
-            echo "- App version: $APP_VERSION"
-
-            # Show the updated line
-            echo -e "\n=== Updated chart table entry ==="
-            grep -n "\[${CHART_NAME}\]" "$README_FILE" || echo "Chart not found in README.md"
-          else
-            echo "README.md not found"
           fi
 
       - name: Create Pull Request
@@ -205,48 +158,37 @@ jobs:
           token: ${{ secrets.CHARTS_REPO_TOKEN }}
           path: charts
           add-paths: |
-            charts/${{ github.event.repository.name }}/**
+            charts/${{ steps.update-chart.outputs.chart_name }}/**
             README.md
-          commit-message: "chore: update vault-transit-unseal-operator to ${{ steps.version.outputs.version }}"
-          title: "chore: update vault-transit-unseal-operator to ${{ steps.version.outputs.version }}"
+          commit-message: "chore: update ${{ steps.update-chart.outputs.chart_name }} to ${{ steps.version.outputs.version }}"
+          title: "chore: update ${{ steps.update-chart.outputs.chart_name }} to ${{ steps.version.outputs.version }}"
           body: |
             ## Automated Chart Update
 
-            This PR updates the vault-transit-unseal-operator Helm chart:
-            - **appVersion**: `${{ steps.version.outputs.version }}`
-            - **Chart version**: `${{ steps.update-chart.outputs.chart_version }}`
-            - **Version bump type**: ${{ steps.update-chart.outputs.version_bump_reason }}
+            This PR updates the ${{ steps.update-chart.outputs.chart_name }} Helm chart:
+            - **Version**: `${{ steps.update-chart.outputs.chart_version }}` (chart and app synced)
 
             ### Files Updated
-            - `charts/vault-transit-unseal-operator/Chart.yaml` - Updated appVersion and chart version
-            - `charts/vault-transit-unseal-operator/crds/*.yaml` - Synced all CRDs from operator
-            - `charts/vault-transit-unseal-operator/templates/clusterrole.yaml` - Synced RBAC rules from operator
+            - `charts/${{ steps.update-chart.outputs.chart_name }}/Chart.yaml` - Updated appVersion and chart version
+            - `charts/${{ steps.update-chart.outputs.chart_name }}/crds/*.yaml` - Synced CRDs from operator
+            - `charts/${{ steps.update-chart.outputs.chart_name }}/templates/clusterrole.yaml` - Synced RBAC rules from operator
             - `README.md` - Updated chart version and app version in charts table
 
             ### What's Changed
 
-            This update includes the latest operator version with the following changes:
-
             ${{ github.event.release.body }}
-
-            ### Checklist
-
-            - [ ] Chart version bump is appropriate
-            - [ ] appVersion matches the operator release
-            - [ ] No breaking changes in default values
-            - [ ] Chart is ready for release
 
             ### Next Steps
 
             After merging this PR, create a new release tag:
             ```bash
-            git tag vault-transit-unseal-operator-v${{ steps.update-chart.outputs.chart_version }}
-            git push origin vault-transit-unseal-operator-v${{ steps.update-chart.outputs.chart_version }}
+            git tag ${{ steps.update-chart.outputs.chart_name }}-v${{ steps.update-chart.outputs.chart_version }}
+            git push origin ${{ steps.update-chart.outputs.chart_name }}-v${{ steps.update-chart.outputs.chart_version }}
             ```
 
             ---
-            *This PR was automatically generated when [operator version ${{ steps.version.outputs.version }}](https://github.com/fredericrous/vault-transit-unseal-operator/releases/tag/v${{ steps.version.outputs.version }}) was released.*
-          branch: update-vault-transit-unseal-operator-${{ steps.version.outputs.version }}
+            *This PR was automatically generated when [operator version ${{ steps.version.outputs.version }}](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}) was released.*
+          branch: update-${{ steps.update-chart.outputs.chart_name }}-${{ steps.version.outputs.version }}
           base: main
           labels: |
             chart-update
@@ -261,33 +203,24 @@ jobs:
           repository: fredericrous/charts
           issue-number: ${{ steps.create-pr.outputs.pull-request-number }}
           body: |
-            ### 🧪 Testing Instructions
+            ### Testing Instructions
 
             Test the updated chart locally:
             ```bash
-            # Clone and checkout the PR branch
             git clone https://github.com/fredericrous/charts.git
             cd charts
-            git checkout update-vault-transit-unseal-operator-${{ steps.version.outputs.version }}
+            git checkout update-${{ steps.update-chart.outputs.chart_name }}-${{ steps.version.outputs.version }}
 
-            # Test the chart
-            helm template vault-transit-unseal-operator ./charts/vault-transit-unseal-operator
-            helm lint ./charts/vault-transit-unseal-operator
-
-            # Install test
-            helm install test-release ./charts/vault-transit-unseal-operator --dry-run --debug
+            helm template ${{ steps.update-chart.outputs.chart_name }} ./charts/${{ steps.update-chart.outputs.chart_name }}
+            helm lint ./charts/${{ steps.update-chart.outputs.chart_name }}
+            helm install test-release ./charts/${{ steps.update-chart.outputs.chart_name }} --dry-run --debug
             ```
 
-      # Optional: Enable auto-merge if tests pass
-      # Requires branch protection rules with required status checks
       - name: Enable auto-merge
         if: steps.create-pr.outputs.pull-request-number && github.event_name == 'release'
         continue-on-error: true
         run: |
-          # Wait a bit for PR to be fully created
           sleep 5
-
-          # Enable auto-merge (requires repo settings to allow)
           gh pr merge ${{ steps.create-pr.outputs.pull-request-number }} \
             --repo fredericrous/charts \
             --auto \
