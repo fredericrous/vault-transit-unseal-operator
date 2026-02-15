@@ -1,0 +1,19 @@
+# Vault Transit Unseal Operator Helm Chart
+apiVersion: v2
+name: vault-transit-unseal-operator
+description: A Kubernetes operator that automatically manages HashiCorp Vault initialization and unsealing using transit unseal
+type: application
+version: 2.1.8
+appVersion: "2.1.8"
+keywords:
+  - vault
+  - transit
+  - unseal
+  - operator
+  - kubernetes
+home: https://github.com/fredericrous/vault-transit-unseal-operator
+sources:
+  - https://github.com/fredericrous/vault-transit-unseal-operator
+maintainers:
+  - name: fredericrous
+icon: https://raw.githubusercontent.com/hashicorp/vault/main/ui/public/favicon.png

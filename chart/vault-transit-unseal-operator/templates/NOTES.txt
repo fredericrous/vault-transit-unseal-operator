@@ -1,0 +1,133 @@
+1. Get the operator status by running these commands:
+   kubectl get deployment -n {{ .Release.Namespace }} {{ include "vault-transit-unseal-operator.fullname" . }}
+   kubectl get pods -n {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "vault-transit-unseal-operator.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+2. Check the operator logs:
+   kubectl logs -n {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "vault-transit-unseal-operator.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -f
+
+3. Create a transit token secret for your Vault:
+   kubectl create secret generic vault-transit-token \
+     -n vault \
+     --from-literal=token=<YOUR_TRANSIT_TOKEN>
+
+4. Create a VaultTransitUnseal resource to start managing your Vault:
+
+   === Basic Example ===
+   cat <<EOF | kubectl apply -f -
+   apiVersion: vault.homelab.io/v1alpha1
+   kind: VaultTransitUnseal
+   metadata:
+     name: vault-main
+     namespace: vault
+   spec:
+     vaultPod:
+       namespace: vault
+       selector:
+         app: vault
+     transitVault:
+       address: http://your-transit-vault:8200
+       secretRef:
+         name: vault-transit-token
+   EOF
+
+   === Advanced Example with Post-Unseal Configuration ===
+   cat <<EOF | kubectl apply -f -
+   apiVersion: vault.homelab.io/v1alpha1
+   kind: VaultTransitUnseal
+   metadata:
+     name: vault-production
+     namespace: vault
+   spec:
+     vaultPod:
+       namespace: vault
+       selector:
+         app.kubernetes.io/name: vault
+         app.kubernetes.io/instance: vault
+     
+     transitVault:
+       address: https://transit-vault.example.com:8200
+       secretRef:
+         name: vault-transit-token
+         key: token  # optional, defaults to 'token'
+       keyName: autounseal-prod
+       mountPath: transit
+       tlsSkipVerify: false
+     
+     initialization:
+       recoveryShares: 5
+       recoveryThreshold: 3
+       secretNames:
+         adminToken: vault-root-token
+         recoveryKeys: vault-recovery-keys
+         storeRecoveryKeys: false  # Don't store recovery keys for production
+         adminTokenAnnotations:
+           reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+           reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: "external-secrets"
+     
+     monitoring:
+       checkInterval: "30s"
+       retryInterval: "10s"
+       maxRetries: 5
+     
+     postUnsealConfig:
+       enableKV: true
+       kvConfig:
+         path: "secret"
+         version: 2
+       
+       enableExternalSecretsOperator: true
+       externalSecretsOperatorConfig:
+         policyName: "external-secrets-operator"
+         kubernetesAuth:
+           roleName: "external-secrets-operator"
+           serviceAccounts:
+           - name: external-secrets
+             namespace: external-secrets
+           ttl: "24h"
+           maxTTL: "720h"
+   EOF
+
+   === Example using ConfigMap for Transit Address ===
+   # First create the ConfigMap
+   kubectl create configmap vault-transit-config -n vault \
+     --from-literal=transit-address=https://transit-vault.example.com:8200
+
+   # Then create the VaultTransitUnseal
+   cat <<EOF | kubectl apply -f -
+   apiVersion: vault.homelab.io/v1alpha1
+   kind: VaultTransitUnseal
+   metadata:
+     name: vault-main
+     namespace: vault
+   spec:
+     vaultPod:
+       namespace: vault
+       selector:
+         app: vault
+     transitVault:
+       addressFrom:
+         configMapKeyRef:
+           name: vault-transit-config
+           key: transit-address
+         default: "http://fallback-vault:8200"  # Optional fallback
+       secretRef:
+         name: vault-transit-token
+   EOF
+
+5. Monitor the VaultTransitUnseal status:
+   kubectl get vaulttransitunseal -n vault
+   kubectl describe vaulttransitunseal vault-main -n vault
+
+6. Troubleshooting:
+   # Check if Vault pods are being discovered
+   kubectl logs -n {{ .Release.Namespace }} deployment/{{ include "vault-transit-unseal-operator.fullname" . }} | grep -i "found vault pod"
+   
+   # Check for errors
+   kubectl logs -n {{ .Release.Namespace }} deployment/{{ include "vault-transit-unseal-operator.fullname" . }} | grep -i error
+   
+   # Verify RBAC permissions
+   kubectl auth can-i list pods --as=system:serviceaccount:{{ .Release.Namespace }}:{{ include "vault-transit-unseal-operator.serviceAccountName" . }} -n vault
+   kubectl auth can-i create secrets --as=system:serviceaccount:{{ .Release.Namespace }}:{{ include "vault-transit-unseal-operator.serviceAccountName" . }} -n vault
+
+For more information and examples, visit:
+https://github.com/fredericrous/vault-transit-unseal-operator

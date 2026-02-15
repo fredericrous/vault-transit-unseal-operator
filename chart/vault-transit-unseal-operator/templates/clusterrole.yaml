@@ -1,0 +1,41 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "vault-transit-unseal-operator.fullname" . }}
+  labels:
+    {{- include "vault-transit-unseal-operator.labels" . | nindent 4 }}
+rules:
+# Core resources
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+# Custom resources
+- apiGroups: ["vault.homelab.io"]
+  resources: ["vaulttransitunseals"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["vault.homelab.io"]
+  resources: ["vaulttransitunseals/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["vault.homelab.io"]
+  resources: ["vaulttransitunseals/finalizers"]
+  verbs: ["update"]
+# Events for debugging
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+# Leader election
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

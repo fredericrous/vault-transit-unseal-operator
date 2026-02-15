@@ -1,0 +1,18 @@
+{{- if .Values.kubeRbacProxy.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vault-transit-unseal-operator.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vault-transit-unseal-operator.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: https
+  selector:
+    {{- include "vault-transit-unseal-operator.selectorLabels" . | nindent 4 }}
+{{- end }}

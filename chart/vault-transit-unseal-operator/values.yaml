@@ -1,0 +1,175 @@
+# Default values for vault-transit-unseal-operator.
+
+# Create the namespace if it doesn't exist
+createNamespace: false
+
+# Namespace to watch for Vault pods (empty string means all namespaces)
+watchNamespace: ""
+
+# CRD installation
+crds:
+  install: true  # Install CRDs from the crds/ directory
+
+# Operator features
+enableLeaderElection: false
+
+# Operator configuration
+maxConcurrentReconciles: 3
+reconcileTimeout: 5m
+vaultTimeout: 30s
+vaultTlsValidation: true
+
+# Operator deployment configuration
+replicaCount: 1
+
+image:
+  repository: ghcr.io/fredericrous/vault-transit-unseal-operator
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Controller manager configuration
+controllerManager:
+  # Resources for the controller manager
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+
+  # Security context for the controller manager
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    # runAsUser: 65532
+
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 8081
+    initialDelaySeconds: 15
+    periodSeconds: 20
+
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: 8081
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+  # Manager configuration
+  manager:
+    args:
+    - --health-probe-bind-address=:8081
+    - --metrics-bind-address=127.0.0.1:8080
+    - --zap-log-level=info
+    - --zap-stacktrace-level=error
+    - --zap-time-encoding=iso8601
+
+# Kube-rbac-proxy configuration (for metrics)
+kubeRbacProxy:
+  enabled: true
+  image:
+    repository: gcr.io/kubebuilder/kube-rbac-proxy
+    tag: v0.13.1
+  args:
+  - --secure-listen-address=0.0.0.0:8443
+  - --upstream=http://127.0.0.1:8080/
+  - --logtostderr=true
+  - --v=0
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 5m
+      memory: 64Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  # fsGroup: 2000
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Webhook configuration
+webhook:
+  enabled: true
+  certManager:
+    enabled: true
+    # Issuer reference for the webhook certificate
+    issuerRef:
+      name: selfsigned-issuer
+      kind: Issuer
+
+# Service Monitor for Prometheus
+serviceMonitor:
+  enabled: false
+  # Interval at which metrics should be scraped
+  interval: 30s
+  # Timeout after which the scrape is ended
+  scrapeTimeout: 10s
+  # Additional labels for the ServiceMonitor
+  labels: {}
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+# Network Policy
+networkPolicy:
+  enabled: false
+
+# Priority Class
+priorityClassName: ""
+
+# Extra environment variables
+extraEnvVars: []
+# - name: LOG_LEVEL
+#   value: debug
+
+# Extra volumes
+extraVolumes: []
+# - name: custom-config
+#   configMap:
+#     name: custom-config
+
+# Extra volume mounts
+extraVolumeMounts: []
+# - name: custom-config
+#   mountPath: /etc/custom-config
+#   readOnly: true

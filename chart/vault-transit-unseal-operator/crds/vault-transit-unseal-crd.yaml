@@ -1,0 +1,554 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: vaulttransitunseals.vault.homelab.io
+spec:
+  group: vault.homelab.io
+  names:
+    kind: VaultTransitUnseal
+    listKind: VaultTransitUnsealList
+    plural: vaulttransitunseals
+    singular: vaulttransitunseal
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: VaultTransitUnseal is the Schema for the vaulttransitunseals
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: VaultTransitUnsealSpec defines the desired state of VaultTransitUnseal
+            properties:
+              argocd:
+                description: ArgoCD integration settings
+                properties:
+                  applicationName:
+                    description: |-
+                      Application name that manages this operator's CRDs
+                      If specified, operator will wait for this application to be healthy
+                    type: string
+                  enabled:
+                    default: false
+                    description: |-
+                      Enable ArgoCD integration
+                      When enabled, CRDs will be managed by ArgoCD instead of the operator
+                    type: boolean
+                  namespace:
+                    default: argocd
+                    description: ArgoCD namespace
+                    type: string
+                  skipCRDInstall:
+                    default: true
+                    description: Skip CRD installation when ArgoCD integration is
+                      enabled
+                    type: boolean
+                  waitTimeout:
+                    default: 5m
+                    description: Wait timeout for ArgoCD application to be ready
+                    type: string
+                type: object
+              initialization:
+                description: Initialization parameters
+                properties:
+                  forceReinitialize:
+                    default: false
+                    description: |-
+                      ForceReinitialize will generate a new root token even if Vault is already initialized
+                      This is useful when the admin token is lost but Vault is already initialized
+                    type: boolean
+                  recoveryShares:
+                    default: 1
+                    description: Number of recovery key shares
+                    type: integer
+                  recoveryThreshold:
+                    default: 1
+                    description: Recovery key threshold
+                    type: integer
+                  secretNames:
+                    description: Names for created secrets
+                    properties:
+                      adminToken:
+                        default: vault-admin-token
+                        description: Name for admin token secret
+                        type: string
+                      adminTokenAnnotations:
+                        additionalProperties:
+                          type: string
+                        description: Annotations to add to the admin token secret
+                        type: object
+                      recoveryKeys:
+                        default: vault-keys
+                        description: Name for recovery keys secret
+                        type: string
+                      recoveryKeysAnnotations:
+                        additionalProperties:
+                          type: string
+                        description: Annotations to add to the recovery keys secret
+                        type: object
+                      skipAdminTokenCreation:
+                        default: false
+                        description: |-
+                          Skip creating admin token secret (for external token management)
+                          When true, the operator will not create placeholder admin tokens
+                        type: boolean
+                      storeRecoveryKeys:
+                        default: false
+                        description: |-
+                          Store recovery keys in a secret
+                          Set to false for production environments where recovery keys should be handled outside of Kubernetes
+                        type: boolean
+                    type: object
+                  tokenRecovery:
+                    description: Token recovery configuration for disaster recovery
+                      scenarios
+                    properties:
+                      backupToTransit:
+                        default: true
+                        description: Backup admin tokens to transit vault KV for recovery
+                        type: boolean
+                      enabled:
+                        default: true
+                        description: Enable token recovery features
+                        type: boolean
+                      transitKVPath:
+                        description: |-
+                          KV path in transit vault for token backup
+                          Defaults to vault-transit-unseal/<namespace>/<name>/admin-token
+                        type: string
+                    type: object
+                type: object
+              monitoring:
+                description: Monitoring parameters
+                properties:
+                  checkInterval:
+                    default: 30s
+                    description: How often to check Vault status
+                    type: string
+                  retryInterval:
+                    default: 10s
+                    description: Retry interval for failed operations
+                    type: string
+                type: object
+              postUnsealConfig:
+                description: Post-unseal configuration
+                properties:
+                  enableExternalSecretsOperator:
+                    default: true
+                    description: |-
+                      Enable External Secrets Operator configuration
+                      This creates kubernetes auth, ESO policy and role
+                      Set to false if vault-config-operator manages ESO via GitOps
+                    type: boolean
+                  enableKV:
+                    default: true
+                    description: Enable KV v2 secret engine
+                    type: boolean
+                  enableVaultConfigOperatorBootstrap:
+                    default: false
+                    description: |-
+                      Enable minimal bootstrap for vault-config-operator
+                      This ONLY enables kubernetes auth and creates controller-manager role
+                      Use this when vault-config-operator manages all other Vault config via GitOps
+                    type: boolean
+                  externalSecretsOperatorConfig:
+                    description: External Secrets Operator configuration
+                    properties:
+                      kubernetesAuth:
+                        description: Kubernetes auth configuration
+                        properties:
+                          maxTTL:
+                            default: 24h
+                            description: Default max TTL
+                            type: string
+                          roleName:
+                            default: external-secrets-operator
+                            description: Role name
+                            type: string
+                          serviceAccounts:
+                            description: Service accounts that can authenticate
+                            items:
+                              description: ServiceAccountRef references a service
+                                account
+                              properties:
+                                name:
+                                  description: Service account name
+                                  type: string
+                                namespace:
+                                  description: Namespace
+                                  type: string
+                              required:
+                              - name
+                              - namespace
+                              type: object
+                            type: array
+                          ttl:
+                            default: 24h
+                            description: Default TTL
+                            type: string
+                        type: object
+                      policyName:
+                        default: external-secrets-operator
+                        description: Policy name
+                        type: string
+                    type: object
+                  kvConfig:
+                    description: KV engine configuration
+                    properties:
+                      deleteVersionAfter:
+                        default: 30d
+                        description: Delete version after duration (e.g., "30d")
+                        type: string
+                      maxVersions:
+                        default: 5
+                        description: Max versions to keep
+                        type: integer
+                      path:
+                        default: secret
+                        description: Mount path for KV engine
+                        type: string
+                      version:
+                        default: 2
+                        description: KV version
+                        type: integer
+                    type: object
+                type: object
+              tokenManagement:
+                description: Token management configuration
+                properties:
+                  autoRenew:
+                    default: true
+                    description: Enable automatic token renewal
+                    type: boolean
+                  autoRotate:
+                    default: true
+                    description: Enable automatic token rotation
+                    type: boolean
+                  creationDelay:
+                    default: 30s
+                    description: Delay before creating token (for delayed strategy)
+                    type: string
+                  dependencies:
+                    description: Dependencies that must be ready before creating token
+                    properties:
+                      customConditions:
+                        description: Custom conditions to wait for
+                        items:
+                          properties:
+                            apiVersion:
+                              description: Type of resource to check
+                              type: string
+                            condition:
+                              description: JSONPath expression that should evaluate
+                                to true
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - condition
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                        type: array
+                      deployments:
+                        description: Wait for specific deployments to be ready
+                        items:
+                          properties:
+                            minReadyReplicas:
+                              default: 1
+                              description: Minimum ready replicas
+                              format: int32
+                              type: integer
+                            name:
+                              description: Name of the deployment (supports prefix
+                                matching)
+                              type: string
+                            namespace:
+                              description: Namespace of the deployment
+                              type: string
+                          required:
+                          - name
+                          - namespace
+                          type: object
+                        type: array
+                      jobs:
+                        description: Wait for specific jobs to complete
+                        items:
+                          properties:
+                            name:
+                              description: Name of the job
+                              type: string
+                            namespace:
+                              description: Namespace of the job
+                              type: string
+                            waitForSuccess:
+                              default: true
+                              description: Wait for successful completion
+                              type: boolean
+                          required:
+                          - name
+                          - namespace
+                          type: object
+                        type: array
+                    type: object
+                  enabled:
+                    default: true
+                    description: Enable automatic token management
+                    type: boolean
+                  policyName:
+                    default: vault-admin
+                    description: Policy to attach to admin token
+                    type: string
+                  rotationPeriod:
+                    default: 720h
+                    description: Rotation period
+                    type: string
+                  strategy:
+                    default: delayed
+                    description: Token creation strategy
+                    enum:
+                    - immediate
+                    - delayed
+                    - external
+                    type: string
+                  ttl:
+                    default: 24h
+                    description: Token TTL
+                    type: string
+                required:
+                - enabled
+                type: object
+              transitVault:
+                description: Transit Vault configuration
+                properties:
+                  address:
+                    description: Transit Vault address (direct value)
+                    type: string
+                  addressFrom:
+                    description: Reference to get the address from ConfigMap or Secret
+                    properties:
+                      configMapKeyRef:
+                        description: Reference to a key in a ConfigMap
+                        properties:
+                          key:
+                            description: Key in the ConfigMap
+                            type: string
+                          name:
+                            description: Name of the ConfigMap
+                            type: string
+                          namespace:
+                            description: Namespace of the ConfigMap (defaults to the
+                              namespace of the VaultTransitUnseal)
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      default:
+                        description: Default value to use if the reference cannot
+                          be resolved
+                        type: string
+                      secretKeyRef:
+                        description: Reference to a key in a Secret
+                        properties:
+                          key:
+                            description: Key in the Secret
+                            type: string
+                          name:
+                            description: Name of the Secret
+                            type: string
+                          namespace:
+                            description: Namespace of the Secret (defaults to the
+                              namespace of the VaultTransitUnseal)
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                    type: object
+                  keyName:
+                    default: autounseal
+                    description: Transit key name
+                    type: string
+                  mountPath:
+                    default: transit
+                    description: Transit mount path
+                    type: string
+                  secretRef:
+                    description: Secret containing transit token
+                    properties:
+                      key:
+                        default: token
+                        description: Key in the secret
+                        type: string
+                      name:
+                        description: Name of the secret
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  tlsSkipVerify:
+                    default: true
+                    description: Skip TLS verification
+                    type: boolean
+                required:
+                - secretRef
+                type: object
+              vaultPod:
+                description: Vault pods to manage
+                properties:
+                  namespace:
+                    description: Namespace where Vault is deployed
+                    type: string
+                  selector:
+                    additionalProperties:
+                      type: string
+                    description: Label selector for Vault pods
+                    type: object
+                  serviceName:
+                    description: |-
+                      Service name to connect to Vault (optional)
+                      If not specified, the operator will auto-discover the service using the pod selector
+                    type: string
+                  servicePort:
+                    default: 8300
+                    description: Service port to connect to Vault
+                    format: int32
+                    type: integer
+                  vaultAddress:
+                    description: |-
+                      Override the full Vault address (e.g., https://vault.example.com)
+                      This takes precedence over service discovery
+                    type: string
+                required:
+                - namespace
+                - selector
+                type: object
+            required:
+            - transitVault
+            - vaultPod
+            type: object
+          status:
+            description: VaultTransitUnsealStatus defines the observed state of VaultTransitUnseal
+            properties:
+              conditions:
+                description: Current conditions
+                items:
+                  description: Condition represents the state of a VaultTransitUnseal
+                    at a certain point
+                  properties:
+                    lastTransitionTime:
+                      description: Last time the condition transitioned
+                      type: string
+                    message:
+                      description: Human-readable message
+                      type: string
+                    reason:
+                      description: Reason for the condition's last transition
+                      type: string
+                    status:
+                      description: Status of the condition, one of True, False, Unknown
+                      type: string
+                    type:
+                      description: Type of condition
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              configurationStatus:
+                description: Configuration status
+                properties:
+                  externalSecretsOperatorConfigured:
+                    description: External Secrets Operator configured
+                    type: boolean
+                  externalSecretsOperatorConfiguredTime:
+                    description: Last time ESO was configured
+                    type: string
+                  kvConfigured:
+                    description: KV engine configured
+                    type: boolean
+                  kvConfiguredTime:
+                    description: Last time KV was configured
+                    type: string
+                  vaultConfigOperatorBootstrapped:
+                    description: vault-config-operator bootstrap configured
+                    type: boolean
+                  vaultConfigOperatorBootstrappedTime:
+                    description: Last time vault-config-operator bootstrap was configured
+                    type: string
+                type: object
+              initialized:
+                description: Whether Vault is initialized
+                type: boolean
+              lastCheckTime:
+                description: Last time Vault status was checked
+                type: string
+              sealed:
+                description: Whether Vault is sealed
+                type: boolean
+              tokenStatus:
+                description: Token management status
+                properties:
+                  accessor:
+                    description: Token accessor for management operations
+                    type: string
+                  createdAt:
+                    description: When the token was created
+                    type: string
+                  error:
+                    description: Error message if token creation failed
+                    type: string
+                  expiresAt:
+                    description: When the token will expire
+                    type: string
+                  initialized:
+                    description: Indicates if initial token creation is complete (for
+                      hybrid approach)
+                    type: boolean
+                  lastRenewedAt:
+                    description: When the token was last renewed
+                    type: string
+                  nextRotationAt:
+                    description: When the token should be rotated
+                    type: string
+                  state:
+                    description: Current state of the token
+                    type: string
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

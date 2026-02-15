@@ -1,0 +1,38 @@
+# High Availability test configuration
+# This tests the chart with multiple replicas and pod disruption budget
+
+replicaCount: 3
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Enable anti-affinity to spread pods across nodes
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - vault-transit-unseal-operator
+        topologyKey: kubernetes.io/hostname
+
+# Increase resources for HA
+controllerManager:
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Enable monitoring
+serviceMonitor:
+  enabled: true
+  labels:
+    prometheus: kube-prometheus

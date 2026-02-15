@@ -1,0 +1,36 @@
+# Minimal configuration test
+# This tests the chart with minimal resources and features disabled
+
+replicaCount: 1
+
+# Minimal resources
+controllerManager:
+  resources:
+    limits:
+      cpu: 100m
+      memory: 64Mi
+    requests:
+      cpu: 10m
+      memory: 32Mi
+
+# Disable optional features
+kubeRbacProxy:
+  enabled: false
+
+serviceMonitor:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+# Faster probes for testing
+controllerManager:
+  livenessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  readinessProbe:
+    initialDelaySeconds: 2
+    periodSeconds: 5
