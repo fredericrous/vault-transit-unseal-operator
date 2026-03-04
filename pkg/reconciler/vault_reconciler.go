@@ -74,6 +74,21 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 		r.MetricsRecorder.RecordReconciliation(time.Since(start), result.Error == nil)
 	}()
 
+	// Set initial token state so bootstrap has visibility into operator progress.
+	// Without this, tokenStatus.state is omitempty and absent from the status,
+	// causing bootstrap to log "Token state not found" with no feedback.
+	if vtu.Spec.TokenManagement != nil && vtu.Spec.TokenManagement.Enabled &&
+		vtu.Status.TokenStatus.State == "" {
+		vtu.Status.TokenStatus.State = vaultv1alpha1.TokenStatePending
+	}
+
+	// Always persist status on exit so bootstrap can observe operator progress.
+	defer func() {
+		if err := r.updateStatus(ctx, vtu); err != nil {
+			log.Error(err, "Failed to update status in deferred handler")
+		}
+	}()
+
 	// Verify expected secrets exist
 	if r.SecretVerifier != nil {
 		log.V(1).Info("Verifying expected secrets")
@@ -143,14 +158,6 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 					"Failed to process pod %s: %v", pod.Name, err)
 			}
 		}
-	}
-
-	// Update status
-	if err := r.updateStatus(ctx, vtu); err != nil {
-		log.Error(err, "Failed to update status")
-		result.Error = operrors.NewTransientError("failed to update status", err).
-			WithContext("resource", client.ObjectKeyFromObject(vtu))
-		return result
 	}
 
 	// Determine requeue interval
@@ -276,6 +283,14 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 					"Missing %d secrets, %d incomplete secrets detected",
 					len(verificationResult.Missing), len(verificationResult.Incomplete))
 			}
+		}
+	}
+
+	// If vault is not yet ready for token management, signal "Waiting" so bootstrap has visibility
+	if (status.Sealed || !status.Initialized) && r.TokenManager != nil && vtu.Spec.TokenManagement != nil {
+		if vtu.Status.TokenStatus.State != vaultv1alpha1.TokenStateActive &&
+			vtu.Status.TokenStatus.State != vaultv1alpha1.TokenStateFailed {
+			vtu.Status.TokenStatus.State = vaultv1alpha1.TokenStateWaiting
 		}
 	}
 
