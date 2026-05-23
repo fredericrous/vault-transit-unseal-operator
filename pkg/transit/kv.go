@@ -3,6 +3,7 @@ package transit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -10,6 +11,28 @@ import (
 	"github.com/go-logr/logr"
 	vaultapi "github.com/hashicorp/vault/api"
 )
+
+// isForbidden returns true when err is a Vault API response with HTTP
+// 403, including when wrapped by fmt.Errorf("…: %w", err). Used to
+// distinguish "I'm not allowed to introspect this" from "this
+// genuinely doesn't exist" — the transit-unseal token in homelab can
+// write KV at secret/data/* but cannot list sys/mounts, so a 403 on
+// the mount-listing check just means "skip create, trust that the
+// mount exists" rather than triggering a doomed Mount() attempt that
+// would 403 anyway.
+func isForbidden(err error) bool {
+	if err == nil {
+		return false
+	}
+	var respErr *vaultapi.ResponseError
+	if errors.As(err, &respErr) {
+		return respErr.StatusCode == 403
+	}
+	// Fallback for older SDK paths / wrapped strings where the
+	// ResponseError got reduced to a plain string.
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "permission denied") || strings.Contains(s, "403")
+}
 
 // KVClient provides KV v2 operations on the transit vault
 type KVClient struct {
@@ -169,9 +192,21 @@ func (kv *KVClient) CheckKVEnabled(ctx context.Context) error {
 
 // EnsureKVEnabled ensures that KV v2 is enabled at the expected path
 func (kv *KVClient) EnsureKVEnabled(ctx context.Context) error {
-	// First check if it's already enabled
-	if err := kv.CheckKVEnabled(ctx); err == nil {
+	checkErr := kv.CheckKVEnabled(ctx)
+	if checkErr == nil {
 		kv.log.V(1).Info("KV v2 already enabled", "mount", kv.kvMount)
+		return nil
+	}
+
+	// 403 on the check means our token can write to KV but can't
+	// introspect sys/mounts — the homelab transit-unseal token's
+	// situation. The Mount() call below would 403 too. Treat as
+	// "assume mounted, let the actual write surface a real error
+	// if the mount truly doesn't exist."
+	if isForbidden(checkErr) {
+		kv.log.V(1).Info("CheckKVEnabled forbidden — assuming mount exists, skipping Mount() (transit token lacks sys/mounts perms)",
+			"mount", kv.kvMount,
+		)
 		return nil
 	}
 
