@@ -286,6 +286,35 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 		}
 	}
 
+	// Drift detection: catch silent overwrites of the recovery share
+	// (the 2026-05-23 failure mode). Sets the RecoveryKeysIntact
+	// condition + emits Event + bumps a metric so the Prometheus
+	// alert fires before the next admin-token rotation tries to use
+	// the bad share.
+	if status.Initialized && vtu.Spec.Initialization.SecretNames.StoreRecoveryKeys {
+		drift, err := secrets.CheckRecoveryKeyDrift(ctx, r.Client, vtu)
+		if err != nil {
+			log.Error(err, "Recovery-key drift check failed")
+		} else if drift.Checked {
+			cm := NewConditionManager(vtu)
+			if drift.Drifted {
+				log.Error(nil, "Recovery-key drift detected — in-cluster recovery-key-0 no longer matches the hash recorded at init",
+					"expected", drift.ExpectedHash,
+					"observed", drift.ObservedHash,
+				)
+				cm.SetCondition("RecoveryKeysIntact", metav1.ConditionFalse, "RecoveryKeyDrift",
+					"in-cluster recovery-key-0 hash diverged from the value recorded at initialization; generate-root will fail")
+				if r.Recorder != nil {
+					r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "RecoveryKeyDrift",
+						"Recovery key in %s/%s has drifted from initialization hash — Vault will reject it. See docs/operations/vault-token-rotation.md.",
+						vtu.Spec.VaultPod.Namespace, vtu.Spec.Initialization.SecretNames.RecoveryKeys)
+				}
+			} else {
+				cm.SetCondition("RecoveryKeysIntact", metav1.ConditionTrue, "Match", "recovery-key-0 hash matches initialization record")
+			}
+		}
+	}
+
 	// If vault is not yet ready for token management, signal "Waiting" so bootstrap has visibility
 	if (status.Sealed || !status.Initialized) && r.TokenManager != nil && vtu.Spec.TokenManagement != nil {
 		if vtu.Status.TokenStatus.State != vaultv1alpha1.TokenStateActive &&
@@ -449,6 +478,14 @@ func (r *VaultReconciler) StoreSecrets(ctx context.Context, vtu *vaultv1alpha1.V
 			keysData,
 			vtu.Spec.Initialization.SecretNames.RecoveryKeysAnnotations); err != nil {
 			return fmt.Errorf("storing recovery keys: %w", err)
+		}
+
+		// Record SHA-256 of recovery-key-0 on the CR status so the
+		// drift detector can catch silent overwrites (the failure
+		// mode behind the 2026-05-23 outage). Hash only, never the
+		// raw share — that stays in the Secret.
+		if len(initResp.RecoveryKeysB64) > 0 {
+			vtu.Status.RecoveryKeysHash = secrets.HashRecoveryShare([]byte(initResp.RecoveryKeysB64[0]))
 		}
 	} else {
 		r.Log.Info("Recovery keys storage disabled - keys must be recorded securely outside of Kubernetes")

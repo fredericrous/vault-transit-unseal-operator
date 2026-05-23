@@ -445,6 +445,17 @@ type VaultTransitUnsealStatus struct {
 	// Token management status
 	TokenStatus TokenStatus `json:"tokenStatus,omitempty"`
 
+	// RecoveryKeysHash is the SHA-256 of the recovery-key-0 bytes the
+	// operator wrote into the recovery-keys Secret at initialization.
+	// On every subsequent reconcile, the operator recomputes the hash
+	// from the in-cluster Secret value and compares: a mismatch means
+	// the Secret has been overwritten with a value Vault will reject
+	// (the failure mode that caused the 2026-05-23 admin-token
+	// outage). Set once at init; never overwritten unless
+	// ForceReinitialize is asserted.
+	// +optional
+	RecoveryKeysHash string `json:"recoveryKeysHash,omitempty"`
+
 	// Current conditions
 	Conditions []Condition `json:"conditions,omitempty"`
 }
