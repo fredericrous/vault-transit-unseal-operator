@@ -318,6 +318,19 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 						"Failed to manage admin token: %v", err)
 				}
 			}
+
+			// After initial-token reconciliation, also extend the
+			// existing token's TTL if it's approaching renewal. Cheap
+			// no-op when the token has more than TTL/3 of life left;
+			// the renewal itself is what closes the drift loop the
+			// orphaned Kyverno policy was supposed to address.
+			if err := r.TokenManager.RenewIfNeeded(ctx, vtu, vaultClient.GetAPIClient()); err != nil {
+				log.Error(err, "Admin token renewal failed")
+				if r.Recorder != nil {
+					r.Recorder.Eventf(vtu, corev1.EventTypeWarning, "TokenRenewalFailed",
+						"Failed to renew admin token: %v", err)
+				}
+			}
 		}
 
 		// Then apply post-unseal configuration if needed
