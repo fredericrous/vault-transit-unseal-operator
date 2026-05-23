@@ -35,6 +35,11 @@ type SimpleManager struct {
 	Scheme           *runtime.Scheme
 	ServiceDiscovery *discovery.ServiceDiscovery
 	VaultFactory     VaultClientFactory // Factory for creating properly configured Vault clients
+	// AdminTokenBackup persists / recovers the admin token to the
+	// transit (NAS) Vault. Optional; nil disables the
+	// backup-and-recover feature. Implementation lives in
+	// pkg/reconciler so SimpleManager doesn't carry transit deps.
+	AdminTokenBackup AdminTokenBackup
 }
 
 // NewSimpleManager creates a new simplified token manager
@@ -194,7 +199,153 @@ func (m *SimpleManager) createInitialToken(ctx context.Context, vtu *vaultv1alph
 		"ttl", ttl,
 		"kyverno_managed", true)
 
+	// Best-effort backup to NAS Vault so we can self-recover next
+	// time the in-cluster Secret drifts or the operator hits the
+	// "root revoked, admin invalid" deadlock without authelia.
+	// Failure is non-fatal — the in-cluster Secret is still the
+	// primary source of truth.
+	m.tryBackupAdminToken(ctx, vtu, resp.Auth.ClientToken)
+
 	return nil
+}
+
+// tryBackupAdminToken invokes the optional AdminTokenBackup. No-op
+// when the backup is unconfigured or the feature is disabled on the
+// CR. Errors log but never fail the surrounding operation.
+func (m *SimpleManager) tryBackupAdminToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, token string) {
+	if m.AdminTokenBackup == nil {
+		return
+	}
+	if !vtu.Spec.Initialization.TokenRecovery.Enabled ||
+		!vtu.Spec.Initialization.TokenRecovery.BackupToTransit {
+		return
+	}
+	if err := m.AdminTokenBackup.Backup(ctx, vtu, token); err != nil {
+		m.Log.Error(err, "Failed to back up admin token to transit Vault")
+	}
+}
+
+// tryRecoverFromTransitBackup attempts to recover the admin token
+// from the NAS Vault transit backup. Returns true when a fresh,
+// validated token was written to the admin-token Secret and the
+// caller should treat token management as healed; false when no
+// recovery happened (feature disabled, no backup found, backup
+// rejected by homelab Vault). Never returns an error — failure to
+// recover falls through to the existing recovery-keys path.
+func (m *SimpleManager) tryRecoverFromTransitBackup(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) bool {
+	if m.AdminTokenBackup == nil {
+		return false
+	}
+	if !vtu.Spec.Initialization.TokenRecovery.Enabled ||
+		!vtu.Spec.Initialization.TokenRecovery.BackupToTransit {
+		return false
+	}
+
+	backed, err := m.AdminTokenBackup.Recover(ctx, vtu)
+	if err != nil {
+		m.Log.V(1).Info("Transit backup recovery did not return a token", "reason", err.Error())
+		return false
+	}
+	backed = strings.TrimSpace(backed)
+	if backed == "" {
+		return false
+	}
+
+	// Validate the backed-up token actually works against homelab
+	// Vault before persisting it — the backup might be stale (e.g.
+	// a manual rotation happened without a fresh backup) and we
+	// don't want to overwrite the in-cluster Secret with another
+	// invalid value.
+	pod, err := m.findReadyVaultPod(ctx, vtu)
+	if err != nil || pod == nil {
+		m.Log.V(1).Info("No ready vault pod to validate transit-backup token")
+		return false
+	}
+	apiClient, err := m.VaultFactory.NewClientForPod(ctx, pod, vtu)
+	if err != nil {
+		m.Log.Error(err, "Failed to build vault client for transit-backup validation")
+		return false
+	}
+	raw := apiClient.GetAPIClient()
+	original := raw.Token()
+	raw.SetToken(backed)
+	if _, err := raw.Auth().Token().LookupSelf(); err != nil {
+		raw.SetToken(original)
+		m.Log.Info("Transit backup token rejected by Vault — falling through to recovery-keys path",
+			"reason", err.Error())
+		return false
+	}
+	raw.SetToken(original)
+
+	// Persist into the in-cluster Secret with the lifecycle
+	// annotations the existing flows expect.
+	secret := &corev1.Secret{}
+	if err := m.Get(ctx, client.ObjectKey{
+		Namespace: vtu.Spec.VaultPod.Namespace,
+		Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
+	}, secret); err != nil {
+		m.Log.Error(err, "Failed to read admin token secret during transit recovery")
+		return false
+	}
+	if secret.Data == nil {
+		secret.Data = map[string][]byte{}
+	}
+	secret.Data["token"] = []byte(backed)
+	if secret.Annotations == nil {
+		secret.Annotations = map[string]string{}
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	delete(secret.Annotations, "vault.homelab.io/recovery-required")
+	delete(secret.Annotations, "vault.homelab.io/incomplete")
+	delete(secret.Annotations, "vault.homelab.io/needs-replacement")
+	secret.Annotations["vault.homelab.io/replaced-at"] = now
+	secret.Annotations["vault.homelab.io/recovered-from"] = "transit-backup"
+	secret.Annotations["vault.homelab.io/scoped-token"] = "true"
+	if err := m.Update(ctx, secret); err != nil {
+		m.Log.Error(err, "Failed to persist transit-backup token into admin secret")
+		return false
+	}
+
+	m.Log.Info("Recovered admin token from NAS Vault transit backup",
+		"namespace", vtu.Spec.VaultPod.Namespace,
+		"secret", vtu.Spec.Initialization.SecretNames.AdminToken,
+	)
+	vtu.Status.TokenStatus.State = vaultv1alpha1.TokenStateActive
+	vtu.Status.TokenStatus.LastRenewedAt = now
+	return true
+}
+
+// findReadyVaultPod returns the first Ready Vault pod matching the
+// CR selector. Returns nil, nil when no pod is ready (caller should
+// treat as transient and let the next reconcile retry).
+func (m *SimpleManager) findReadyVaultPod(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) (*corev1.Pod, error) {
+	if vtu.Spec.VaultPod.Selector == nil {
+		return nil, nil
+	}
+	pods := &corev1.PodList{}
+	if err := m.List(ctx, pods,
+		client.InNamespace(vtu.Spec.VaultPod.Namespace),
+		client.MatchingLabels(vtu.Spec.VaultPod.Selector),
+	); err != nil {
+		return nil, err
+	}
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		ready := false
+		for _, c := range p.Status.Conditions {
+			if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
+				ready = true
+				break
+			}
+		}
+		if ready {
+			return p, nil
+		}
+	}
+	return nil, nil
 }
 
 // buildLifecycleAnnotations creates annotations for Kyverno lifecycle management
@@ -557,6 +708,17 @@ func (m *SimpleManager) isPlaceholderToken(secret *corev1.Secret, token string) 
 }
 
 func (m *SimpleManager) replaceInvalidToken(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) error {
+	// Before falling into the recovery-keys path (which is the one
+	// that failed during the 2026-05-23 outage because the
+	// in-cluster share had drifted), try to recover the admin token
+	// from the NAS Vault transit backup. The backup is the one the
+	// in-operator renewal loop persists on every successful mint,
+	// so a recent value lives there as long as backupToTransit is
+	// enabled on the CR.
+	if recovered := m.tryRecoverFromTransitBackup(ctx, vtu); recovered {
+		return nil
+	}
+
 	if !vtu.Spec.Initialization.SecretNames.StoreRecoveryKeys {
 		return fmt.Errorf("admin token invalid and recovery keys are not stored")
 	}
@@ -765,6 +927,12 @@ func (m *SimpleManager) replaceRootToken(ctx context.Context, vtu *vaultv1alpha1
 	}
 
 	m.Log.Info("Successfully replaced root token with scoped token", "rootTokenRevoked", bootstrapComplete)
+
+	// Backup the scoped admin token to NAS Vault before revoking
+	// the root — that way, if we hit the "admin invalid + root
+	// revoked" deadlock later, the operator can self-recover from
+	// the NAS Vault backup without needing OIDC.
+	m.tryBackupAdminToken(ctx, vtu, scopedToken)
 
 	// Only mark root token as revoked if we actually revoked it
 	if bootstrapComplete {

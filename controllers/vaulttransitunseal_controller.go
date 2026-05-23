@@ -105,6 +105,12 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		TransitVaultCACert: os.Getenv("TRANSIT_VAULT_CACERT"),
 	}
 
+	// Wire the transit-backup adapter into the token manager AFTER
+	// the reconciler is built — the adapter closes over the
+	// reconciler to reuse the same address resolver, transit token
+	// Secret, and CA cert as the existing init-time backup path.
+	tokenManager.AdminTokenBackup = reconciler.AdminTokenTransitBackup{Reconciler: r.VaultReconciler}
+
 	// Create health checker with simple factory wrapper
 	healthFactory := &healthVaultFactory{inner: vaultFactory}
 	r.HealthChecker = health.NewChecker(r.Client, healthFactory, r.Log.WithName("health"))

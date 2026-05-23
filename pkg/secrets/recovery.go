@@ -420,6 +420,14 @@ func GenerateSecureToken(length int) (string, error) {
 	return base64.URLEncoding.EncodeToString(bytes), nil
 }
 
+// RecoverTokenFromTransit attempts to recover the admin token from
+// the transit Vault backup. Exported because the token manager's
+// drift-recovery path calls it via the AdminTokenBackup interface
+// implementation in pkg/reconciler.
+func (r *RecoveryManager) RecoverTokenFromTransit(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) (string, error) {
+	return r.recoverTokenFromTransit(ctx, vtu)
+}
+
 // recoverTokenFromTransit attempts to recover admin token from transit vault backup
 func (r *RecoveryManager) recoverTokenFromTransit(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) (string, error) {
 	// Resolve transit vault address

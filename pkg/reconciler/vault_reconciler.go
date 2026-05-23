@@ -50,6 +50,38 @@ type SecretManager interface {
 	Get(ctx context.Context, namespace, name, key string) ([]byte, error)
 }
 
+// AdminTokenTransitBackup wires the existing reconciler-side transit
+// backup/recover plumbing into the token.AdminTokenBackup interface
+// so SimpleManager can persist a fresh admin token to NAS Vault on
+// every mint and pull it back during recovery. The struct keeps a
+// pointer to the live VaultReconciler so it reuses the same address
+// resolver, transit token Secret, and CA cert as the existing
+// init-time backup path.
+type AdminTokenTransitBackup struct {
+	Reconciler *VaultReconciler
+}
+
+// Backup implements token.AdminTokenBackup. Delegates to the
+// reconciler's backupTokenToTransit which handles address
+// resolution, KV-mount ensure, and the actual write.
+func (b AdminTokenTransitBackup) Backup(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, token string) error {
+	if b.Reconciler == nil {
+		return fmt.Errorf("transit backup: reconciler is nil")
+	}
+	return b.Reconciler.backupTokenToTransit(ctx, vtu, token)
+}
+
+// Recover implements token.AdminTokenBackup. Delegates to the
+// reconciler's RecoveryManager.recoverTokenFromTransit. Returns an
+// empty string when the backup doesn't exist; an error only on
+// transit-side failure (network, auth).
+func (b AdminTokenTransitBackup) Recover(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) (string, error) {
+	if b.Reconciler == nil || b.Reconciler.RecoveryManager == nil {
+		return "", fmt.Errorf("transit backup: recovery manager unavailable")
+	}
+	return b.Reconciler.RecoveryManager.RecoverTokenFromTransit(ctx, vtu)
+}
+
 // MetricsRecorder records operator metrics
 type MetricsRecorder interface {
 	RecordReconciliation(duration time.Duration, success bool)
