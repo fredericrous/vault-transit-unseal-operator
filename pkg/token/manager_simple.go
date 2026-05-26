@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -137,16 +138,26 @@ func (m *SimpleManager) createInitialToken(ctx context.Context, vtu *vaultv1alph
 		return fmt.Errorf("invalid TTL: %w", err)
 	}
 
-	// Create token
+	// Create token. NoParent (orphan) so revoking the bootstrap root token
+	// later can't cascade-revoke this token's tree. When AutoRenew is set we
+	// make it PERIODIC (Period instead of TTL): a periodic token renews to its
+	// period indefinitely with no max_ttl ceiling, so RenewIfNeeded keeps it
+	// alive forever. A plain TTL+Renewable token dies at max_ttl regardless of
+	// renewal — the 2026-05-26 expiry.
 	tokenReq := &vaultapi.TokenCreateRequest{
 		Policies:  []string{vtu.Spec.TokenManagement.PolicyName},
-		TTL:       ttl.String(),
+		NoParent:  true,
 		Renewable: &vtu.Spec.TokenManagement.AutoRenew,
 		Metadata: map[string]string{
 			"created_by": "vault-transit-unseal-operator",
 			"purpose":    "admin-token",
 			"vtu":        fmt.Sprintf("%s/%s", vtu.Namespace, vtu.Name),
 		},
+	}
+	if vtu.Spec.TokenManagement.AutoRenew {
+		tokenReq.Period = ttl.String()
+	} else {
+		tokenReq.TTL = ttl.String()
 	}
 
 	resp, err := vaultClient.Auth().Token().Create(tokenReq)
@@ -545,9 +556,12 @@ func (m *SimpleManager) CreateScopedTokenFromRoot(ctx context.Context, vtu *vaul
 	}
 
 	renewable := true // Default to renewable
+	// Periodic + orphan, same rationale as the initial mint: indefinitely
+	// renewable (no max_ttl ceiling) and not tied to the root token tree.
 	tokenReq := &vaultapi.TokenCreateRequest{
 		Policies:  []string{policyName},
-		TTL:       ttl.String(),
+		Period:    ttl.String(),
+		NoParent:  true,
 		Renewable: &renewable,
 		Metadata: map[string]string{
 			"created_by": "vault-transit-unseal-operator",
@@ -719,6 +733,16 @@ func (m *SimpleManager) replaceInvalidToken(ctx context.Context, vtu *vaultv1alp
 		return nil
 	}
 
+	// Next: mint a fresh token via the operator's OWN ServiceAccount over
+	// Vault's kubernetes auth (vtu-token-selfheal role -> vault-admin). This
+	// depends on none of the things that can be broken here — the expired
+	// admin token, a stale transit backup, or the revoked root token — so it
+	// closes the "manual recovery required" gap that needed a human on
+	// 2026-05-26. Brings the proven out-of-band CronJob flow in-operator.
+	if recovered := m.tryRecoverViaK8sAuth(ctx, vtu); recovered {
+		return nil
+	}
+
 	if !vtu.Spec.Initialization.SecretNames.StoreRecoveryKeys {
 		return fmt.Errorf("admin token invalid and recovery keys are not stored")
 	}
@@ -817,6 +841,130 @@ func (m *SimpleManager) replaceInvalidToken(ctx context.Context, vtu *vaultv1alp
 	}
 
 	return nil
+}
+
+// k8s-auth self-heal constants. The role must be provisioned in Vault
+// (a KubernetesAuthEngineRole bound to the operator's own SA with the
+// vault-admin policy) while admin access is still available, so it's
+// there when the admin token is dead. Mount path matches the operator's
+// kubernetes auth backend.
+const (
+	selfHealK8sAuthRole = "vtu-token-selfheal"
+	k8sAuthMountPath    = "kubernetes"
+	saJWTPath           = "/var/run/secrets/kubernetes.io/serviceaccount/token" //nolint:gosec // well-known in-pod SA token path, not a credential
+)
+
+// tryRecoverViaK8sAuth mints a fresh admin token by logging in to Vault's
+// kubernetes auth with the operator's OWN ServiceAccount (the
+// selfHealK8sAuthRole carries the vault-admin policy), then minting a
+// periodic + orphan token and installing it. Returns true on success.
+// Depends on none of the failure-prone inputs (expired admin token, stale
+// transit backup, revoked root), so it's the automated recovery of last
+// resort before the recovery-keys dead-end.
+func (m *SimpleManager) tryRecoverViaK8sAuth(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) bool {
+	if vtu.Spec.TokenManagement == nil {
+		return false
+	}
+	jwtBytes, err := os.ReadFile(saJWTPath)
+	if err != nil {
+		m.Log.V(1).Info("k8s-auth self-heal: no ServiceAccount token mounted", "reason", err.Error())
+		return false
+	}
+	jwt := strings.TrimSpace(string(jwtBytes))
+	if jwt == "" {
+		return false
+	}
+
+	pod, err := m.findReadyVaultPod(ctx, vtu)
+	if err != nil || pod == nil {
+		return false
+	}
+	apiClient, err := m.VaultFactory.NewClientForPod(ctx, pod, vtu)
+	if err != nil {
+		m.Log.Error(err, "k8s-auth self-heal: failed to build vault client")
+		return false
+	}
+	raw := apiClient.GetAPIClient()
+	original := raw.Token()
+	defer raw.SetToken(original)
+
+	// Login is unauthenticated; clear any token first.
+	raw.SetToken("")
+	loginResp, err := raw.Logical().Write(
+		fmt.Sprintf("auth/%s/login", k8sAuthMountPath),
+		map[string]any{"role": selfHealK8sAuthRole, "jwt": jwt},
+	)
+	if err != nil || loginResp == nil || loginResp.Auth == nil || loginResp.Auth.ClientToken == "" {
+		reason := "nil auth response"
+		if err != nil {
+			reason = err.Error()
+		}
+		m.Log.Info("k8s-auth self-heal: login failed — is the vtu-token-selfheal role bound to this SA?",
+			"reason", reason)
+		return false
+	}
+	raw.SetToken(loginResp.Auth.ClientToken)
+
+	renewable := true
+	mintResp, err := raw.Auth().Token().Create(&vaultapi.TokenCreateRequest{
+		Policies:  []string{vtu.Spec.TokenManagement.PolicyName},
+		Period:    vtu.Spec.TokenManagement.TTL,
+		NoParent:  true,
+		Renewable: &renewable,
+		Metadata: map[string]string{
+			"created_by": "vault-transit-unseal-operator",
+			"purpose":    "admin-token",
+			"source":     "k8s-auth-selfheal",
+			"vtu":        fmt.Sprintf("%s/%s", vtu.Namespace, vtu.Name),
+		},
+	})
+	if err != nil || mintResp == nil || mintResp.Auth == nil || mintResp.Auth.ClientToken == "" {
+		m.Log.Error(err, "k8s-auth self-heal: token mint failed")
+		return false
+	}
+	newToken := mintResp.Auth.ClientToken
+
+	secret := &corev1.Secret{}
+	if err := m.Get(ctx, client.ObjectKey{
+		Namespace: vtu.Spec.VaultPod.Namespace,
+		Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
+	}, secret); err != nil {
+		m.Log.Error(err, "k8s-auth self-heal: failed to read admin token secret")
+		return false
+	}
+	if secret.Data == nil {
+		secret.Data = map[string][]byte{}
+	}
+	secret.Data["token"] = []byte(newToken)
+	if secret.Annotations == nil {
+		secret.Annotations = map[string]string{}
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	delete(secret.Annotations, "vault.homelab.io/recovery-required")
+	delete(secret.Annotations, "vault.homelab.io/incomplete")
+	delete(secret.Annotations, "vault.homelab.io/needs-replacement")
+	secret.Annotations["vault.homelab.io/scoped-token"] = "true"
+	secret.Annotations["vault.homelab.io/replaced-at"] = now
+	secret.Annotations["vault.homelab.io/recovered-from"] = "k8s-auth-selfheal"
+	if err := m.Update(ctx, secret); err != nil {
+		m.Log.Error(err, "k8s-auth self-heal: failed to persist new token")
+		return false
+	}
+
+	// Back up the fresh token to transit (best-effort) so the cheaper
+	// transit-backup path can recover it next time.
+	if m.AdminTokenBackup != nil &&
+		vtu.Spec.Initialization.TokenRecovery.Enabled &&
+		vtu.Spec.Initialization.TokenRecovery.BackupToTransit {
+		if err := m.AdminTokenBackup.Backup(ctx, vtu, newToken); err != nil {
+			m.Log.V(1).Info("k8s-auth self-heal: transit backup of new token failed (non-fatal)", "reason", err.Error())
+		}
+	}
+
+	m.Log.Info("k8s-auth self-heal: minted + installed fresh periodic admin token")
+	vtu.Status.TokenStatus.State = vaultv1alpha1.TokenStateActive
+	vtu.Status.TokenStatus.LastRenewedAt = now
+	return true
 }
 
 func (m *SimpleManager) lookupTokenAccessor(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, token string) (string, error) {
