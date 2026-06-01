@@ -19,6 +19,7 @@ type Recorder struct {
 	reconciliationTotal    *prometheus.CounterVec
 	vaultStatus            *prometheus.GaugeVec
 	initializationTotal    *prometheus.CounterVec
+	adminTokenTTL          prometheus.Gauge
 }
 
 // NewRecorder creates a new metrics recorder (singleton)
@@ -61,6 +62,12 @@ func createRecorder() *Recorder {
 			},
 			[]string{"success"},
 		),
+		adminTokenTTL: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "vault_admin_token_ttl_seconds",
+				Help: "Remaining TTL of the Vault admin token in seconds, observed on each renewal check. Drives VaultTokenExpiring* alerts directly instead of via the Secret resource_version proxy.",
+			},
+		),
 	}
 
 	// Register metrics
@@ -69,6 +76,7 @@ func createRecorder() *Recorder {
 		r.reconciliationTotal,
 		r.vaultStatus,
 		r.initializationTotal,
+		r.adminTokenTTL,
 	)
 
 	return r
@@ -98,6 +106,11 @@ func (r *Recorder) RecordVaultStatus(initialized, sealed bool) {
 	} else {
 		r.vaultStatus.WithLabelValues("sealed").Set(0)
 	}
+}
+
+// RecordAdminTokenTTL records the admin token's remaining TTL in seconds.
+func (r *Recorder) RecordAdminTokenTTL(seconds float64) {
+	r.adminTokenTTL.Set(seconds)
 }
 
 // RecordInitialization records initialization metrics

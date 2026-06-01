@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
+	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/metrics"
 )
 
 // renewalThresholdFraction is the fraction of the configured TTL at
@@ -94,6 +95,12 @@ func (m *SimpleManager) RenewIfNeeded(
 	if err != nil {
 		return fmt.Errorf("parse ttl from token lookup: %w", err)
 	}
+	// Publish the observed TTL every check (not just on renewal) so the
+	// VaultTokenExpiring* alerts can key off the real remaining lifetime
+	// rather than the Secret resource_version proxy, which only moves on
+	// an actual renewal write and is brittle when the apiserver stalls.
+	metrics.NewRecorder().RecordAdminTokenTTL(float64(ttlRemaining))
+
 	if renewable, _ := info.Data["renewable"].(bool); !renewable {
 		// Periodic / orphan tokens that are non-renewable: nothing to
 		// do here; auto-rotate path will mint a new one when needed.
