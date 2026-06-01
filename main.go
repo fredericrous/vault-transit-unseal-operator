@@ -45,6 +45,15 @@ func main() {
 		probeAddr            = flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to")
 		enableLeaderElection = flag.Bool("leader-elect", false, "Enable leader election for controller manager")
 		leaderElectionID     = flag.String("leader-election-id", "vault-transit-unseal-operator", "Leader election ID")
+		// Defaults are 4x the controller-runtime stock values (15s/10s/2s).
+		// The single-node control plane GC-stalls the apiserver for ~10-15s
+		// a couple of times a day; at the stock 10s renew-deadline the
+		// operator loses its lease and crashes ("leader election lost"),
+		// which also interrupts admin-token renewal. 60s/45s/5s rides
+		// through those stalls. renew-deadline must stay < lease-duration.
+		leaderElectionLeaseDuration = flag.Duration("leader-election-lease-duration", 60*time.Second, "Leader election lease duration (tolerate apiserver GC stalls)")
+		leaderElectionRenewDeadline = flag.Duration("leader-election-renew-deadline", 45*time.Second, "Leader election renew deadline (must be < lease-duration)")
+		leaderElectionRetryPeriod   = flag.Duration("leader-election-retry-period", 5*time.Second, "Leader election retry period")
 
 		// Operational settings
 		namespace               = flag.String("namespace", "vault", "Namespace to watch for Vault pods")
@@ -217,6 +226,12 @@ func main() {
 		HealthProbeBindAddress: cfg.ProbeAddr,
 		LeaderElection:         cfg.EnableLeaderElection,
 		LeaderElectionID:       cfg.LeaderElectionID,
+		// Widened from controller-runtime defaults so the operator
+		// survives the single-CP apiserver GC stalls instead of crashing
+		// on "leader election lost" (see flag defaults above).
+		LeaseDuration: leaderElectionLeaseDuration,
+		RenewDeadline: leaderElectionRenewDeadline,
+		RetryPeriod:   leaderElectionRetryPeriod,
 	})
 	if err != nil {
 		setupLog.Error(err, "Failed to create manager")
