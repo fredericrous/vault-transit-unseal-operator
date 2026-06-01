@@ -17,6 +17,17 @@ type VaultPodSpec struct {
 	// +optional
 	ServiceName string `json:"serviceName,omitempty"`
 
+	// HeadlessServiceName, when set, makes the operator address each Vault pod
+	// INDIVIDUALLY via its per-pod DNS record
+	// (<pod-name>.<headlessServiceName>.<namespace>.svc.cluster.local) instead
+	// of a shared, load-balanced service. This is required to unseal a SPECIFIC
+	// sealed pod: a load-balanced service can only reach the pod the LB happens
+	// to pick, and a client Service that excludes not-ready (sealed) pods can't
+	// reach them at all. Use the StatefulSet's governing headless service, which
+	// publishes not-ready addresses (e.g. "vault-vault-internal").
+	// +optional
+	HeadlessServiceName string `json:"headlessServiceName,omitempty"`
+
 	// Service port to connect to Vault
 	// +kubebuilder:default=8300
 	// +optional
