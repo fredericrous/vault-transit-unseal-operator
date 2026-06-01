@@ -151,9 +151,32 @@ func (d *ServiceDiscovery) GetVaultAddress(ctx context.Context, vaultSpec *vault
 	return address, nil
 }
 
-// GetVaultServiceEndpoint returns the service endpoint for a specific pod
-// This is used when you need to connect to a specific pod through the service
+// GetVaultServiceEndpoint returns the address to reach a SPECIFIC Vault pod.
+//
+// When HeadlessServiceName is set, it addresses the pod individually via its
+// per-pod DNS record (<pod>.<headless>.<ns>.svc.cluster.local) so the operator
+// can reach (and unseal) a specific pod even when it is sealed/not-ready — the
+// governing headless service publishes not-ready addresses. This lets the
+// client-facing service exclude sealed pods without breaking unseal.
+//
+// Without HeadlessServiceName it falls back to the shared (load-balanced)
+// service address — the legacy behavior, which can only reach whichever pod the
+// service load-balances to.
 func (d *ServiceDiscovery) GetVaultServiceEndpoint(ctx context.Context, vaultSpec *vaultv1alpha1.VaultPodSpec, pod *corev1.Pod) (string, error) {
-	// Always use service discovery, never fall back to pod IP
+	if vaultSpec.VaultAddress != "" {
+		// Explicit override still wins (matches GetVaultAddress).
+		return vaultSpec.VaultAddress, nil
+	}
+	if vaultSpec.HeadlessServiceName != "" && pod != nil && pod.Name != "" {
+		port := vaultSpec.ServicePort
+		if port == 0 {
+			port = 8300
+		}
+		address := fmt.Sprintf("http://%s.%s.%s.svc.cluster.local:%d",
+			pod.Name, vaultSpec.HeadlessServiceName, vaultSpec.Namespace, port)
+		d.Log.V(1).Info("Using per-pod address", "address", address, "pod", pod.Name)
+		return address, nil
+	}
+	// Legacy: shared, load-balanced service address.
 	return d.GetVaultAddress(ctx, vaultSpec)
 }
