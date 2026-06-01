@@ -2,7 +2,7 @@ module github.com/fredericrous/homelab/vault-transit-unseal-operator
 
 go 1.25.0
 
-toolchain go1.25.1
+toolchain go1.25.10
 
 require (
 	github.com/go-logr/logr v1.4.3
