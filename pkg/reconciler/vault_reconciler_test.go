@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
@@ -663,18 +664,20 @@ var _ = Describe("VaultReconciler", func() {
 			Expect(metricsRecorder.vaultStatuses[0].sealed).To(BeFalse())
 		})
 
-		It("should handle sealed initialized vault", func() {
+		It("should wait (not restart) a sealed pod within boot grace", func() {
 			vaultClient.initialized = true
 			vaultClient.sealed = true
 			vaultClient.healthy = true
 
-			// The unseal will fail due to mock limitations, but that's expected
+			// createReadyPod sets no State.Running.StartedAt, so the vault
+			// container's running-duration is 0 -> within the boot grace ->
+			// the operator waits for transit auto-unseal rather than restarting.
 			err := vaultReconciler.ProcessPod(ctx, pod, vtu)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("unsealing vault"))
+			Expect(err).NotTo(HaveOccurred())
 
-			// Verify metrics were recorded before the unseal attempt
+			// The pre-restart sealed status is still recorded.
 			Expect(metricsRecorder.vaultStatuses).To(HaveLen(1))
+			Expect(metricsRecorder.vaultStatuses[0].sealed).To(BeTrue())
 		})
 
 		It("should apply post-unseal configuration when specified", func() {
@@ -764,40 +767,51 @@ var _ = Describe("VaultReconciler", func() {
 			// Test passes - configurator won't be called when both are disabled
 		})
 
-		Context("with sealed vault needing unseal", func() {
-			It("should re-check status after unseal attempt", func() {
-				// Setup vault as sealed initially
-				vaultClient.initialized = true
-				vaultClient.sealed = true
-				vaultClient.healthy = true
-				vaultClient.checkStatusCallCount = 0
-
-				// Since UnsealVault will fail due to mock limitations,
-				// we just verify the initial status check happens
-				err := vaultReconciler.ProcessPod(ctx, pod, vtu)
-				Expect(err).To(HaveOccurred())
-
-				// Verify status was checked at least once
-				Expect(vaultClient.checkStatusCallCount).To(BeNumerically(">=", 1))
+		Context("with a stuck sealed vault (beyond boot grace)", func() {
+			BeforeEach(func() {
+				// Mark the vault container as running since well before the
+				// boot grace so the operator treats it as stuck-sealed.
+				pod.Status.ContainerStatuses[0].State = corev1.ContainerState{
+					Running: &corev1.ContainerStateRunning{
+						StartedAt: metav1.NewTime(time.Now().Add(-10 * time.Minute)),
+					},
+				}
+				// Register the pod so its deletion (restart) is observable.
+				k8sClient = fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(pod).
+					Build()
+				vaultReconciler.Client = k8sClient
 			})
 
-			It("should update metrics after unseal", func() {
-				// Setup vault as sealed initially
+			It("should restart the pod to trigger transit auto-unseal", func() {
 				vaultClient.initialized = true
 				vaultClient.sealed = true
 				vaultClient.healthy = true
 
-				// Clear previous metrics
+				err := vaultReconciler.ProcessPod(ctx, pod, vtu)
+				Expect(err).NotTo(HaveOccurred())
+
+				// The sealed pod was deleted (restarted) so it re-runs
+				// transit auto-unseal at boot.
+				got := &corev1.Pod{}
+				getErr := k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), got)
+				Expect(apierrors.IsNotFound(getErr)).To(BeTrue())
+			})
+
+			It("should record the sealed status before restarting", func() {
+				vaultClient.initialized = true
+				vaultClient.sealed = true
+				vaultClient.healthy = true
 				metricsRecorder.vaultStatuses = nil
 
-				// ProcessPod will fail at unseal, but initial metrics should be recorded
 				err := vaultReconciler.ProcessPod(ctx, pod, vtu)
-				Expect(err).To(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 
-				// Verify initial sealed status was recorded
-				Expect(metricsRecorder.vaultStatuses).To(HaveLen(1))
-				Expect(metricsRecorder.vaultStatuses[0].initialized).To(BeTrue())
-				Expect(metricsRecorder.vaultStatuses[0].sealed).To(BeTrue())
+				Expect(metricsRecorder.vaultStatuses).NotTo(BeEmpty())
+				last := metricsRecorder.vaultStatuses[len(metricsRecorder.vaultStatuses)-1]
+				Expect(last.initialized).To(BeTrue())
+				Expect(last.sealed).To(BeTrue())
 			})
 		})
 

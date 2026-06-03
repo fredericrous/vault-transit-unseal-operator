@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -36,6 +37,11 @@ type VaultReconciler struct {
 	RecoveryManager    *secrets.RecoveryManager
 	TokenManager       *token.SimpleManager
 	TransitVaultCACert string // Path to CA certificate for transit vault
+	// SealedRestartGrace is how long a (re)started vault pod is given to
+	// auto-unseal at boot (from the transit seal stanza) before the operator
+	// concludes it's stuck-sealed and restarts it again. Guards against a
+	// delete hot-loop. Zero -> defaultSealedRestartGrace.
+	SealedRestartGrace time.Duration
 }
 
 // VaultClientFactory creates Vault clients
@@ -277,24 +283,37 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 	// Update conditions
 	r.updateConditions(vtu, status)
 
-	// If vault is sealed, attempt to unseal it
+	// If vault is sealed, recover it by RESTARTING the pod.
+	//
+	// This vault uses transit auto-unseal: a sealed node unseals automatically
+	// at process start from the seal stanza. There is NO API to "trigger"
+	// transit unseal on a running node -- POSTing /sys/unseal needs a Shamir
+	// key and 400s ("'key' must be specified") for a transit-sealed vault. So
+	// the only correct recovery is to delete the pod and let it auto-unseal on
+	// restart. A boot grace prevents a delete hot-loop while a freshly-restarted
+	// pod is still unsealing. (The old transit /sys/unseal path -- r.UnsealVault
+	// / transit.Client.UnsealVault -- never worked for transit seal; it stays as
+	// deprecated dead code.)
 	if status.Sealed && status.Initialized {
-		log.Info("Vault is sealed, attempting to unseal")
-		if err := r.UnsealVault(ctx, vaultClient, vtu); err != nil {
-			log.Error(err, "Failed to unseal vault")
-			return fmt.Errorf("unsealing vault: %w", err)
+		if pod.DeletionTimestamp != nil {
+			log.Info("Sealed pod already terminating; awaiting restart + boot auto-unseal")
+			return nil
 		}
-
-		// Re-check status after unseal
-		status, err = vaultClient.CheckStatus(ctx)
-		if err != nil {
-			return fmt.Errorf("checking vault status after unseal: %w", err)
+		if running := r.vaultContainerRunningFor(pod); running < r.sealedRestartGrace() {
+			log.Info("Sealed pod within boot grace; awaiting transit auto-unseal",
+				"runningFor", running.String(), "grace", r.sealedRestartGrace().String())
+			return nil
 		}
-
-		log.Info("Vault unseal completed", "sealed", status.Sealed)
-
-		// Update metrics after unseal
-		r.MetricsRecorder.RecordVaultStatus(status.Initialized, status.Sealed)
+		log.Info("Vault is sealed; restarting pod to trigger transit auto-unseal")
+		if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("restarting sealed pod: %w", err)
+		}
+		r.MetricsRecorder.RecordVaultStatus(status.Initialized, true)
+		if r.Recorder != nil {
+			r.Recorder.Event(vtu, corev1.EventTypeNormal, "RestartedSealedPod",
+				fmt.Sprintf("Restarted sealed pod %s to trigger transit auto-unseal", pod.Name))
+		}
+		return nil
 	}
 
 	// Periodically verify expected secrets exist when vault is initialized
@@ -527,6 +546,35 @@ func (r *VaultReconciler) StoreSecrets(ctx context.Context, vtu *vaultv1alpha1.V
 	}
 
 	return nil
+}
+
+// defaultSealedRestartGrace is the boot window a (re)started vault pod gets to
+// auto-unseal from the transit seal stanza before the operator restarts it
+// again. ~90s comfortably covers transit auto-unseal at boot while keeping a
+// genuinely-stuck pod's recovery prompt.
+const defaultSealedRestartGrace = 90 * time.Second
+
+func (r *VaultReconciler) sealedRestartGrace() time.Duration {
+	if r.SealedRestartGrace > 0 {
+		return r.SealedRestartGrace
+	}
+	return defaultSealedRestartGrace
+}
+
+// vaultContainerRunningFor reports how long the pod's `vault` container has been
+// in the Running state. Returns 0 if it isn't currently running (so a
+// not-yet-running pod is treated as within grace and not restarted).
+func (r *VaultReconciler) vaultContainerRunningFor(pod *corev1.Pod) time.Duration {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name != "vault" {
+			continue
+		}
+		if cs.State.Running == nil || cs.State.Running.StartedAt.IsZero() {
+			return 0
+		}
+		return time.Since(cs.State.Running.StartedAt.Time)
+	}
+	return 0
 }
 
 // hasVaultContainer checks if a pod has a container named "vault"
