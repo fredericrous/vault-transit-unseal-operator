@@ -8,7 +8,9 @@ rules:
 # Core resources
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list", "watch"]
+  # delete: restart a stuck transit-sealed vault pod so it re-runs auto-unseal
+  # at boot (the v2.6.0 sealed-pod recovery; see pkg/reconciler UnsealVault note)
+  verbs: ["get", "list", "watch", "delete"]
 - apiGroups: [""]
   resources: ["pods/exec"]
   verbs: ["create"]
