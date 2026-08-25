@@ -176,8 +176,17 @@ func TestVaultTransitUnsealReconciliation(t *testing.T) {
 		})
 
 		require.NoError(t, err)
-		// Without vault pods, it should use default 30s interval
-		assert.Equal(t, 30*time.Second, result.RequeueAfter)
+		// The point of this case is that monitoring.checkInterval is parsed
+		// and honoured rather than falling back to the 30s default.
+		//
+		// The subtest above created vault-0 in the SHARED fake client, and
+		// that pod is never ready, so processing it fails and the reconciler
+		// halves the interval to retry sooner: 2m30s -> 1m15s. (The original
+		// assertion here expected the 30s default on the premise that no
+		// vault pods existed — a premise the previous subtest had already
+		// invalidated, which is why it failed.)
+		assert.Equal(t, 75*time.Second, result.RequeueAfter)
+		assert.NotEqual(t, 30*time.Second, result.RequeueAfter, "custom interval must not fall back to the default")
 	})
 }
 
