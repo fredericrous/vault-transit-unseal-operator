@@ -1,4 +1,21 @@
 # Default values for vault-transit-unseal-operator.
+#
+# The chart installs the OPERATOR and its CRD. Which Vaults it manages, and how
+# each of them unseals, is expressed in VaultTransitUnseal resources rather
+# than here — one operator serves both unseal modes at once:
+#
+#   spec.mode: transit     (default) restarts a sealed pod so Vault re-runs
+#                          its `seal "transit"` stanza at boot.
+#   spec.mode: stored-key  submits Shamir share(s) from an in-cluster Secret
+#                          to sys/unseal, for a root-of-trust Vault that has
+#                          no transit provider to lean on.
+#
+# Worked examples of both: config/samples/vault-basic.yaml and
+# config/samples/vault-stored-key.yaml. See docs/STORED-KEY-UNSEAL.md.
+#
+# RBAC for both is in templates/clusterrole.yaml and needs no values here: the
+# operator already reads Secrets cluster-wide, which covers the stored-key
+# Secret it unseals from.
 
 # Create the namespace if it doesn't exist
 createNamespace: false
@@ -161,6 +178,14 @@ priorityClassName: ""
 extraEnvVars: []
 # - name: LOG_LEVEL
 #   value: debug
+#
+# VAULT_CACERT is how you trust a Vault that terminates TLS itself, i.e. when
+# a VaultTransitUnseal sets `vaultPod.scheme: https`. Mount the CA with
+# extraVolumes/extraVolumeMounts below and point this at it:
+# - name: VAULT_CACERT
+#   value: /etc/vault-ca/ca.crt
+#
+# TRANSIT_VAULT_CACERT does the same for the transit Vault (transit mode only).
 
 # Extra volumes
 extraVolumes: []

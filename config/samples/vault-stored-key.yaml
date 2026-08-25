@@ -1,0 +1,77 @@
+# Stored-key (Shamir) unsealing.
+#
+# For a ROOT-OF-TRUST Vault: one that has no transit provider to unseal
+# against, because it is itself the thing everything else trusts. Its unseal
+# key lives in a Kubernetes Secret in the same cluster, and the operator
+# submits it to sys/unseal whenever Vault comes up sealed.
+#
+# Yes, that means the key that opens Vault sits in etcd on the same cluster.
+# That is the standard trade for a Vault with no external unseal authority,
+# and the reason it is acceptable is that etcd is encrypted at rest and
+# snapshotted off-node. The alternative — transit unseal against another
+# cluster — is exactly the dependency such a Vault exists without.
+#
+# The operator NEVER creates that Secret and never initializes Vault in this
+# mode. `bootstrap run <cluster> vault-setup` owns both: it runs
+# `vault operator init` and stores the share(s). Until it has, this resource
+# reports Initialized=False / AwaitingExternalInit and stands still.
+---
+apiVersion: vault.homelab.io/v1alpha1
+kind: VaultTransitUnseal
+metadata:
+  name: vault-stored-key
+  namespace: vault
+spec:
+  mode: stored-key
+
+  vaultPod:
+    namespace: vault
+    selector:
+      app.kubernetes.io/name: vault
+      app.kubernetes.io/component: server
+
+    # A sealed Vault pod is NOT ready, so the client-facing Service will not
+    # route to it and the operator could never reach the very pod it needs to
+    # unseal. Point at the StatefulSet's governing headless service, which
+    # publishes not-ready addresses.
+    headlessServiceName: vault-internal
+    servicePort: 8200
+
+    # scheme: https        # when Vault terminates TLS itself; supply the CA
+    #                      # through the operator's VAULT_CACERT env var
+    # vaultAddress: ...    # or override the address outright
+
+  storedKey:
+    secretRef:
+      # These are the defaults, spelled out here for clarity. They match the
+      # Secret the vault-auto-unseal CronJob reads, so swapping the CronJob
+      # for this resource moves no key material.
+      name: vault-unseal-keys
+      key: unseal-keys.txt
+      # namespace: vault   # defaults to vaultPod.namespace
+
+  monitoring:
+    # The floor on how long a Vault can sit sealed if the pod watch misses
+    # the transition. The CronJob this replaces ran every 2 minutes.
+    checkInterval: 30s
+    retryInterval: 10s
+
+  # transitVault is omitted on purpose: there is no transit provider here.
+---
+# The Secret this resource reads. Shown for shape only — it is created by
+# `bootstrap run <cluster> vault-setup` from the output of `vault operator
+# init`, and MUST NOT be committed to Git.
+#
+# One share per line. A single-line file (with or without a trailing newline)
+# is the common case and is exactly what the CronJob format was.
+#
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: vault-unseal-keys
+#   namespace: vault
+# stringData:
+#   unseal-keys.txt: |
+#     <share 1>
+#     <share 2>
+#     <share 3>

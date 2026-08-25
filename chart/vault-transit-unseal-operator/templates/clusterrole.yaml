@@ -9,13 +9,21 @@ rules:
 - apiGroups: [""]
   resources: ["pods"]
   # delete: restart a stuck transit-sealed vault pod so it re-runs auto-unseal
-  # at boot (the v2.6.0 sealed-pod recovery; see pkg/reconciler UnsealVault note)
+  # at boot (the v2.6.0 sealed-pod recovery; see pkg/reconciler UnsealVault note).
+  # stored-key mode never deletes a pod — it unseals the running process — but
+  # one operator serves both modes, so the verb stays.
+  # watch: the Pod watch that makes unsealing event-driven rather than a poll.
   verbs: ["get", "list", "watch", "delete"]
 - apiGroups: [""]
   resources: ["pods/exec"]
   verbs: ["create"]
 - apiGroups: [""]
   resources: ["secrets"]
+  # get/list/watch also covers the stored-key unseal Secret
+  # (spec.storedKey.secretRef, default vault-unseal-keys/unseal-keys.txt).
+  # The operator only ever READS that one — it never creates or rewrites it;
+  # `bootstrap run <cluster> vault-setup` owns its contents. The watch is what
+  # makes seeding it unseal Vault immediately.
   verbs: ["get", "list", "watch", "create", "update", "patch"]
 - apiGroups: [""]
   resources: ["configmaps"]

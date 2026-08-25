@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Stored-key (Shamir) unseal mode.** `VaultTransitUnseal.spec.mode` selects
+  between `transit` (default) and `stored-key`; the latter submits the key
+  share(s) from an in-cluster Secret to `sys/unseal` for a root-of-trust Vault
+  that has no transit provider. `spec.storedKey.secretRef` defaults to
+  `vault-unseal-keys` / `unseal-keys.txt` in the Vault namespace. CR example in
+  `config/samples/vault-stored-key.yaml`.
+- `vaultPod.scheme` (`http` | `https`) for the addresses the operator builds
+  itself. Unset keeps the previous hard-coded `http`.
+- Pod watch, so a Vault that seals reaches the operator at once instead of
+  waiting out `monitoring.checkInterval`.
+- Metric `vault_operator_unseal_attempts_total{mode,result}`; status fields
+  `unsealMode` and `lastUnsealTime`; condition `KeySecretPresent`.
+
+### Changed
+- `spec.transitVault` is no longer a required property, so a stored-key
+  resource can omit it. Transit resources are unaffected — an absent or empty
+  `mode` resolves to `transit`.
+
+### Notes
+- No RBAC change was needed for stored-key mode: the ClusterRole already reads
+  Secrets cluster-wide. The operator only ever reads the unseal Secret.
+
 - Initial Helm chart implementation
 - Support for all operator configuration options
 - CRD installation as part of the chart
