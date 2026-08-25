@@ -56,11 +56,24 @@ jobs:
           CHART_NAME="${{ github.event.repository.name }}"
           CHART_DIR="charts/charts/${CHART_NAME}"
 
-          # Sync CRDs from kubebuilder output
-          if [ -d "source/config/crd/bases" ]; then
-            echo "Syncing CRDs from kubebuilder output..."
+          # Sync CRDs from kubebuilder output.
+          #
+          # REPLACE the directory, do not merge into it. The step above has
+          # already copied source/chart/*, crds included, so a plain `cp` here
+          # only ever ADDS files: a CRD that was ever published under a
+          # different filename stays in the charts repo forever, and Helm then
+          # applies the same CRD twice from two byte-identical files. That is
+          # exactly how vault-transit-unseal-crd.yaml and
+          # vault.homelab.io_vaulttransitunseals.yaml came to co-exist.
+          #
+          # Only wipe once we know we have something to put back.
+          if ls source/config/crd/bases/*.yaml > /dev/null 2>&1; then
+            echo "Syncing CRDs from kubebuilder output (replacing crds/)..."
+            rm -rf "${CHART_DIR}/crds"
             mkdir -p "${CHART_DIR}/crds"
             cp -v source/config/crd/bases/*.yaml "${CHART_DIR}/crds/"
+          else
+            echo "::warning::No CRDs found in source/config/crd/bases; leaving ${CHART_DIR}/crds untouched"
           fi
 
           # Generate ClusterRole template from kubebuilder RBAC
