@@ -435,7 +435,12 @@ const (
 // cluster can swap the CronJob for a CR without touching the Secret.
 const (
 	DefaultStoredKeySecretName = "vault-unseal-keys"
-	DefaultStoredKeySecretKey  = "unseal-keys.txt"
+	// gosec G101 fires on the identifier ("...SecretKey") plus a string
+	// literal. This is the NAME of a key inside a Secret — a filename, the
+	// same one the CronJob mounted — not the key material, which the
+	// operator only ever reads at runtime and never embeds.
+	// #nosec G101 -- Secret data key name, not a credential
+	DefaultStoredKeySecretKey = "unseal-keys.txt"
 )
 
 // StoredKeySpec configures stored-key (Shamir) unsealing.
