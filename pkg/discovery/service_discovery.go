@@ -145,10 +145,20 @@ func (d *ServiceDiscovery) GetVaultAddress(ctx context.Context, vaultSpec *vault
 	}
 
 	// Construct the address
-	address := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, vaultSpec.Namespace, port)
+	address := fmt.Sprintf("%s://%s.%s.svc.cluster.local:%d", schemeFor(vaultSpec), serviceName, vaultSpec.Namespace, port)
 	d.Log.V(1).Info("Constructed vault address", "address", address)
 
 	return address, nil
+}
+
+// schemeFor returns the URL scheme to build Vault addresses with. Empty means
+// "http" — the scheme every address was hard-coded to before vaultPod.scheme
+// existed, so an unset field reproduces the previous behaviour exactly.
+func schemeFor(vaultSpec *vaultv1alpha1.VaultPodSpec) string {
+	if vaultSpec != nil && vaultSpec.Scheme != "" {
+		return vaultSpec.Scheme
+	}
+	return "http"
 }
 
 // GetVaultServiceEndpoint returns the address to reach a SPECIFIC Vault pod.
@@ -172,8 +182,8 @@ func (d *ServiceDiscovery) GetVaultServiceEndpoint(ctx context.Context, vaultSpe
 		if port == 0 {
 			port = 8300
 		}
-		address := fmt.Sprintf("http://%s.%s.%s.svc.cluster.local:%d",
-			pod.Name, vaultSpec.HeadlessServiceName, vaultSpec.Namespace, port)
+		address := fmt.Sprintf("%s://%s.%s.%s.svc.cluster.local:%d",
+			schemeFor(vaultSpec), pod.Name, vaultSpec.HeadlessServiceName, vaultSpec.Namespace, port)
 		d.Log.V(1).Info("Using per-pod address", "address", address, "pod", pod.Name)
 		return address, nil
 	}

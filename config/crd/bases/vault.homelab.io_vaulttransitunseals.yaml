@@ -138,6 +138,15 @@ spec:
                         type: string
                     type: object
                 type: object
+              mode:
+                default: transit
+                description: |-
+                  Mode selects how a sealed Vault is recovered. Absent or empty means
+                  "transit", so existing resources keep their behaviour untouched.
+                enum:
+                - transit
+                - stored-key
+                type: string
               monitoring:
                 description: Monitoring parameters
                 properties:
@@ -231,6 +240,31 @@ spec:
                         default: 2
                         description: KV version
                         type: integer
+                    type: object
+                type: object
+              storedKey:
+                description: |-
+                  StoredKey configures stored-key (Shamir) unsealing. Only read when
+                  mode is "stored-key"; its own defaults apply when it is omitted.
+                properties:
+                  secretRef:
+                    description: |-
+                      SecretRef points at the Secret holding the unseal key share(s), one
+                      share per line. Defaults to vault-unseal-keys/unseal-keys.txt in the
+                      Vault namespace.
+                    properties:
+                      key:
+                        default: unseal-keys.txt
+                        description: Key inside the Secret. Its value is the share
+                          list, one per line.
+                        type: string
+                      name:
+                        default: vault-unseal-keys
+                        description: Name of the Secret
+                        type: string
+                      namespace:
+                        description: Namespace of the Secret. Defaults to vaultPod.namespace.
+                        type: string
                     type: object
                 type: object
               tokenManagement:
@@ -345,7 +379,9 @@ spec:
                 - enabled
                 type: object
               transitVault:
-                description: Transit Vault configuration
+                description: |-
+                  Transit Vault configuration. Required in transit mode; ignored (and
+                  safely omitted) in stored-key mode.
                 properties:
                   address:
                     description: Transit Vault address (direct value)
@@ -437,6 +473,19 @@ spec:
                   namespace:
                     description: Namespace where Vault is deployed
                     type: string
+                  scheme:
+                    description: |-
+                      Scheme to use when the operator builds the Vault address itself
+                      (service discovery / per-pod DNS). Empty means "http", which is the
+                      behaviour every existing install has. Set to "https" for a Vault that
+                      terminates TLS itself; supply the CA to trust through the operator's
+                      VAULT_CACERT environment variable (chart: extraEnvVars + extraVolumes),
+                      or leave it unset to fall back to the operator's TLS-validation setting.
+                      Ignored when VaultAddress is set — that override carries its own scheme.
+                    enum:
+                    - http
+                    - https
+                    type: string
                   selector:
                     additionalProperties:
                       type: string
@@ -462,7 +511,6 @@ spec:
                 - selector
                 type: object
             required:
-            - transitVault
             - vaultPod
             type: object
           status:
@@ -525,6 +573,12 @@ spec:
               lastCheckTime:
                 description: Last time Vault status was checked
                 type: string
+              lastUnsealTime:
+                description: |-
+                  LastUnsealTime is when the operator last brought this Vault from
+                  sealed to unsealed. Only set by stored-key mode: transit mode never
+                  unseals over the API, it restarts the pod and lets Vault do it.
+                type: string
               recoveryKeysHash:
                 description: |-
                   RecoveryKeysHash is the SHA-256 of the recovery-key-0 bytes the
@@ -568,6 +622,12 @@ spec:
                     description: Current state of the token
                     type: string
                 type: object
+              unsealMode:
+                description: |-
+                  UnsealMode is the mode the operator last reconciled this resource in.
+                  Echoed back so `kubectl get vaulttransitunseal -o yaml` shows which
+                  automation is actually in charge, defaults resolved.
+                type: string
             type: object
         type: object
     served: true

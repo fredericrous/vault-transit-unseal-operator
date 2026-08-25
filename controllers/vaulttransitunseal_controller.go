@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -19,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -136,6 +138,11 @@ func (r *VaultTransitUnsealReconciler) SetupWithManager(mgr ctrl.Manager) error 
 			builder.WithPredicates(
 				predicate.ResourceVersionChangedPredicate{},
 			),
+		).
+		Watches(
+			&corev1.Pod{},
+			r.enqueueRequestsForVaultPod(),
+			builder.WithPredicates(vaultPodReadinessPredicate()),
 		).
 		WithOptions(opts).
 		Complete(r)
@@ -393,48 +400,119 @@ func (r *VaultTransitUnsealReconciler) enqueueRequestsForConfigMap() handler.Eve
 	})
 }
 
+// enqueueRequestsForVaultPod enqueues every VaultTransitUnseal whose vaultPod
+// selector matches the given Pod.
+//
+// This is what makes unsealing event-driven rather than a poll: a Vault that
+// seals (or a replacement pod that comes up sealed) flips its readiness and
+// reaches the reconciler at once, instead of sitting sealed until the next
+// monitoring.checkInterval tick. The check interval remains as the safety net
+// for anything the watch misses.
+func (r *VaultTransitUnsealReconciler) enqueueRequestsForVaultPod() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(r.vaultPodRequests)
+}
+
+// vaultPodRequests maps a Pod to every VaultTransitUnseal that manages it.
+func (r *VaultTransitUnsealReconciler) vaultPodRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return nil
+	}
+
+	vtuList := &vaultv1alpha1.VaultTransitUnsealList{}
+	if err := r.List(ctx, vtuList); err != nil {
+		r.Log.Error(err, "Failed to list VaultTransitUnseal resources")
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, vtu := range vtuList.Items {
+		if vtu.Spec.VaultPod.Namespace != pod.Namespace {
+			continue
+		}
+		if len(vtu.Spec.VaultPod.Selector) == 0 ||
+			!labels.SelectorFromSet(vtu.Spec.VaultPod.Selector).Matches(labels.Set(pod.Labels)) {
+			continue
+		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      vtu.Name,
+				Namespace: vtu.Namespace,
+			},
+		})
+	}
+
+	return requests
+}
+
+// vaultPodReadinessPredicate keeps the Pod watch quiet.
+//
+// Vault pods churn their status constantly (conditions, probe timestamps,
+// container restarts), and ResourceVersionChangedPredicate — what the other
+// watches here use — would turn every one of those into a reconcile. Only a
+// real transition matters: a pod appearing or disappearing, or its phase or
+// vault-container readiness actually changing.
+func vaultPodReadinessPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return true },
+		DeleteFunc:  func(event.DeleteEvent) bool { return true },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldPod, okOld := e.ObjectOld.(*corev1.Pod)
+			newPod, okNew := e.ObjectNew.(*corev1.Pod)
+			if !okOld || !okNew {
+				return false
+			}
+			return oldPod.Status.Phase != newPod.Status.Phase ||
+				vaultContainerReady(oldPod) != vaultContainerReady(newPod)
+		},
+	}
+}
+
+// vaultContainerReady reports the Ready flag of the pod's `vault` container.
+func vaultContainerReady(pod *corev1.Pod) bool {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name == "vault" {
+			return cs.Ready
+		}
+	}
+	return false
+}
+
 // enqueueRequestsForSecret returns a handler that enqueues VaultTransitUnseal objects
 // that reference the given Secret in their addressFrom field
 func (r *VaultTransitUnsealReconciler) enqueueRequestsForSecret() handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-		secret, ok := obj.(*corev1.Secret)
-		if !ok {
-			return nil
-		}
+	return handler.EnqueueRequestsFromMapFunc(r.secretRequests)
+}
 
-		// List all VaultTransitUnseal resources
-		vtuList := &vaultv1alpha1.VaultTransitUnsealList{}
-		if err := r.List(ctx, vtuList); err != nil {
-			r.Log.Error(err, "Failed to list VaultTransitUnseal resources")
-			return nil
-		}
+// secretRequests maps a Secret to every VaultTransitUnseal that reads it.
+func (r *VaultTransitUnsealReconciler) secretRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+	secret, ok := obj.(*corev1.Secret)
+	if !ok {
+		return nil
+	}
 
-		var requests []reconcile.Request
-		for _, vtu := range vtuList.Items {
-			// Check if this VTU references the Secret for address
-			if vtu.Spec.TransitVault.AddressFrom != nil &&
-				vtu.Spec.TransitVault.AddressFrom.SecretKeyRef != nil {
+	// List all VaultTransitUnseal resources
+	vtuList := &vaultv1alpha1.VaultTransitUnsealList{}
+	if err := r.List(ctx, vtuList); err != nil {
+		r.Log.Error(err, "Failed to list VaultTransitUnseal resources")
+		return nil
+	}
 
-				ref := vtu.Spec.TransitVault.AddressFrom.SecretKeyRef
-				namespace := ref.Namespace
-				if namespace == "" {
-					namespace = vtu.Namespace
-				}
+	var requests []reconcile.Request
+	for _, vtu := range vtuList.Items {
+		// Check if this VTU references the Secret for address
+		if vtu.Spec.TransitVault.AddressFrom != nil &&
+			vtu.Spec.TransitVault.AddressFrom.SecretKeyRef != nil {
 
-				// If the Secret matches, enqueue the VTU
-				if secret.Name == ref.Name && secret.Namespace == namespace {
-					requests = append(requests, reconcile.Request{
-						NamespacedName: types.NamespacedName{
-							Name:      vtu.Name,
-							Namespace: vtu.Namespace,
-						},
-					})
-				}
+			ref := vtu.Spec.TransitVault.AddressFrom.SecretKeyRef
+			namespace := ref.Namespace
+			if namespace == "" {
+				namespace = vtu.Namespace
 			}
 
-			// Also check transit token secret references
-			if secret.Name == vtu.Spec.TransitVault.SecretRef.Name &&
-				secret.Namespace == vtu.Spec.VaultPod.Namespace {
+			// If the Secret matches, enqueue the VTU
+			if secret.Name == ref.Name && secret.Namespace == namespace {
 				requests = append(requests, reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Name:      vtu.Name,
@@ -444,12 +522,39 @@ func (r *VaultTransitUnsealReconciler) enqueueRequestsForSecret() handler.EventH
 			}
 		}
 
-		if len(requests) > 0 {
-			r.Log.V(1).Info("Enqueuing VaultTransitUnseal resources due to Secret change",
-				"secret", types.NamespacedName{Name: secret.Name, Namespace: secret.Namespace},
-				"count", len(requests))
+		// Also check transit token secret references
+		if secret.Name == vtu.Spec.TransitVault.SecretRef.Name &&
+			secret.Namespace == vtu.Spec.VaultPod.Namespace {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      vtu.Name,
+					Namespace: vtu.Namespace,
+				},
+			})
+			continue
 		}
 
-		return requests
-	})
+		// ...and the stored-key secret, so seeding it (the last step of
+		// `bootstrap run <cluster> vault-setup`) unseals immediately
+		// instead of waiting out a check interval.
+		if vtu.IsStoredKeyMode() {
+			keyNamespace, keyName, _ := vtu.Spec.StoredKeySecretRef()
+			if secret.Name == keyName && secret.Namespace == keyNamespace {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      vtu.Name,
+						Namespace: vtu.Namespace,
+					},
+				})
+			}
+		}
+	}
+
+	if len(requests) > 0 {
+		r.Log.V(1).Info("Enqueuing VaultTransitUnseal resources due to Secret change",
+			"secret", types.NamespacedName{Name: secret.Name, Namespace: secret.Namespace},
+			"count", len(requests))
+	}
+
+	return requests
 }

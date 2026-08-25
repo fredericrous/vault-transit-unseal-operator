@@ -93,6 +93,7 @@ type MetricsRecorder interface {
 	RecordReconciliation(duration time.Duration, success bool)
 	RecordVaultStatus(initialized, sealed bool)
 	RecordInitialization(success bool)
+	RecordUnsealAttempt(mode string, success bool)
 }
 
 // Result encapsulates the reconciliation result
@@ -103,7 +104,12 @@ type Result struct {
 
 // Reconcile handles a VaultTransitUnseal resource
 func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) *Result {
-	log := r.Log.WithValues("resource", client.ObjectKeyFromObject(vtu))
+	mode := vtu.Spec.EffectiveUnsealMode()
+	log := r.Log.WithValues("resource", client.ObjectKeyFromObject(vtu), "unsealMode", mode)
+
+	// Echo the resolved mode so operators can see which automation owns this
+	// Vault without having to reason about an absent spec.mode.
+	vtu.Status.UnsealMode = string(mode)
 
 	// Record metrics
 	start := time.Now()
@@ -140,8 +146,11 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 		// Log detailed verification results
 		r.SecretVerifier.LogMissingSecrets(verificationResult)
 
-		// Attempt recovery if secrets are missing and recovery manager is available
-		if !verificationResult.AllPresent && r.RecoveryManager != nil {
+		// Attempt recovery if secrets are missing and recovery manager is
+		// available. Recovery reads the token backup out of the TRANSIT
+		// Vault's KV store, so there is nothing for it to talk to in
+		// stored-key mode — attempting it there would only log failures.
+		if !verificationResult.AllPresent && r.RecoveryManager != nil && mode == vaultv1alpha1.UnsealModeTransit {
 			log.Info("Attempting to recover missing secrets")
 			// For recovery, we need a vault client - try to get one from the first available pod
 			pods, err := r.FindVaultPods(ctx, vtu)
@@ -159,8 +168,19 @@ func (r *VaultReconciler) Reconcile(ctx context.Context, vtu *vaultv1alpha1.Vaul
 		}
 	}
 
-	// Validate transit token exists
-	if err := r.ValidateTransitToken(ctx, vtu); err != nil {
+	// Validate the credential this mode unseals with: the transit token, or
+	// the stored key share(s). Either way a missing credential is a config
+	// error, not something to retry into.
+	if mode == vaultv1alpha1.UnsealModeStoredKey {
+		if _, err := r.ValidateStoredKeySecret(ctx, vtu); err != nil {
+			if r.Recorder != nil {
+				r.Recorder.Event(vtu, corev1.EventTypeWarning, "InvalidConfig", err.Error())
+			}
+			result.Error = operrors.NewConfigError("unseal key secret validation failed", err).
+				WithContext("resource", client.ObjectKeyFromObject(vtu))
+			return result
+		}
+	} else if err := r.ValidateTransitToken(ctx, vtu); err != nil {
 		if r.Recorder != nil {
 			r.Recorder.Event(vtu, corev1.EventTypeWarning, "InvalidConfig", err.Error())
 		}
@@ -251,8 +271,14 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 	// Update metrics
 	r.MetricsRecorder.RecordVaultStatus(status.Initialized, status.Sealed)
 
+	storedKeyMode := vtu.IsStoredKeyMode()
+
 	// Handle initialization if needed
-	if !status.Initialized {
+	if !status.Initialized && storedKeyMode {
+		// Deliberately does NOT initialize; see awaitingInitMessage.
+		r.handleUninitializedStoredKey(vtu, pod)
+		return nil
+	} else if !status.Initialized {
 		if err := r.InitializeVault(ctx, vaultClient, pod, vtu); err != nil {
 			r.MetricsRecorder.RecordInitialization(false)
 			return fmt.Errorf("initializing vault: %w", err)
@@ -294,6 +320,14 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 	// pod is still unsealing. (The old transit /sys/unseal path -- r.UnsealVault
 	// / transit.Client.UnsealVault -- never worked for transit seal; it stays as
 	// deprecated dead code.)
+	//
+	// stored-key mode is the exception: a Shamir-sealed Vault DOES unseal
+	// over the API, so it submits the stored share(s) to the running process
+	// instead of restarting it.
+	if status.Sealed && status.Initialized && storedKeyMode {
+		return r.UnsealWithStoredKey(ctx, vaultClient, pod, vtu)
+	}
+
 	if status.Sealed && status.Initialized {
 		if pod.DeletionTimestamp != nil {
 			log.Info("Sealed pod already terminating; awaiting restart + boot auto-unseal")

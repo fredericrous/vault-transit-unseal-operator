@@ -183,6 +183,11 @@ func (v *Verifier) VerifyExpectedSecrets(ctx context.Context, vtu *vaultv1alpha1
 // getExpectedSecrets returns the list of secrets that should exist for a VaultTransitUnseal
 func (v *Verifier) getExpectedSecrets(vtu *vaultv1alpha1.VaultTransitUnseal) []ExpectedSecret {
 	namespace := vtu.Spec.VaultPod.Namespace
+
+	if vtu.IsStoredKeyMode() {
+		return v.storedKeyExpectedSecrets(vtu)
+	}
+
 	secrets := []ExpectedSecret{
 		// Transit token is always required
 		{
@@ -221,6 +226,39 @@ func (v *Verifier) getExpectedSecrets(vtu *vaultv1alpha1.VaultTransitUnseal) []E
 			Namespace: namespace,
 			Keys:      []string{"token"},
 			Optional:  true,
+		})
+	}
+
+	return secrets
+}
+
+// storedKeyExpectedSecrets lists the secrets a stored-key resource needs.
+//
+// The set is deliberately much smaller than transit mode's. There is no
+// transit token to hold, and — since this mode never initializes Vault — no
+// admin token or recovery-key Secret the operator itself would have created.
+// The admin token is only expected when token management is explicitly turned
+// on; otherwise it belongs to the bootstrap CLI and demanding it here would
+// report a permanent, unactionable "missing secret".
+func (v *Verifier) storedKeyExpectedSecrets(vtu *vaultv1alpha1.VaultTransitUnseal) []ExpectedSecret {
+	keyNamespace, keyName, keyKey := vtu.Spec.StoredKeySecretRef()
+
+	secrets := []ExpectedSecret{
+		{
+			Name:      keyName,
+			Namespace: keyNamespace,
+			Keys:      []string{keyKey},
+			Optional:  false,
+		},
+	}
+
+	if vtu.Spec.TokenManagement != nil && vtu.Spec.TokenManagement.Enabled &&
+		!vtu.Spec.Initialization.SecretNames.SkipAdminTokenCreation {
+		secrets = append(secrets, ExpectedSecret{
+			Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
+			Namespace: vtu.Spec.VaultPod.Namespace,
+			Keys:      []string{"token"},
+			Optional:  false,
 		})
 	}
 

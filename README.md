@@ -1,6 +1,21 @@
 # Vault Transit Unseal Operator
 
-**Never manually unseal Vault again!** This Kubernetes operator automatically initializes and unseals HashiCorp Vault instances using transit unseal, making Vault operations truly hands-free.
+**Never manually unseal Vault again!** This Kubernetes operator keeps HashiCorp Vault instances initialized and unsealed, making Vault operations truly hands-free.
+
+## Two unseal modes
+
+`VaultTransitUnseal.spec.mode` picks how a sealed Vault is recovered. One operator install serves both at once.
+
+| `spec.mode` | For | How it unseals |
+| --- | --- | --- |
+| `transit` (default) | A **leaf** Vault, sealed with `seal "transit"` against another Vault | Restarts the sealed pod so Vault re-runs its seal stanza at boot. There is no API to trigger a transit unseal. |
+| `stored-key` | A **root-of-trust** Vault: Shamir-sealed, with no transit provider to lean on | Submits the key share(s) from an in-cluster Secret to `sys/unseal`, on the running process. |
+
+`mode` is optional. An absent or empty value means `transit`, so resources written before the field existed behave exactly as they always did.
+
+Stored-key mode replaces the hand-rolled `vault-auto-unseal` CronJob — same Secret, same key, event-driven instead of every two minutes, and with conditions, events and metrics. See **[docs/STORED-KEY-UNSEAL.md](docs/STORED-KEY-UNSEAL.md)** for the CR, what it reports, why it refuses to initialize Vault, and how to swap a cluster off the CronJob.
+
+The rest of this README describes **transit mode**.
 
 ## Features
 
@@ -18,6 +33,8 @@
 - Transit Vault instance (can be external)
 - Transit token with appropriate permissions
 - Vault configured with transit seal (see [Vault Configuration](#vault-configuration))
+
+For `mode: stored-key` none of the transit prerequisites apply. All it needs is a Secret holding the unseal key share(s) — see [docs/STORED-KEY-UNSEAL.md](docs/STORED-KEY-UNSEAL.md).
 
 ## Vault Configuration
 

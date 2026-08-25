@@ -4,6 +4,10 @@ metadata:
   name: vault-transit-unseal
   namespace: vault
 spec:
+  # transit is the default and what an omitted `mode` resolves to; spelled out
+  # here to contrast with config/samples/vault-stored-key.yaml.
+  mode: transit
+
   vaultPod:
     namespace: vault
     selector:

@@ -33,6 +33,17 @@ type VaultPodSpec struct {
 	// +optional
 	ServicePort int32 `json:"servicePort,omitempty"`
 
+	// Scheme to use when the operator builds the Vault address itself
+	// (service discovery / per-pod DNS). Empty means "http", which is the
+	// behaviour every existing install has. Set to "https" for a Vault that
+	// terminates TLS itself; supply the CA to trust through the operator's
+	// VAULT_CACERT environment variable (chart: extraEnvVars + extraVolumes),
+	// or leave it unset to fall back to the operator's TLS-validation setting.
+	// Ignored when VaultAddress is set — that override carries its own scheme.
+	// +kubebuilder:validation:Enum=http;https
+	// +optional
+	Scheme string `json:"scheme,omitempty"`
+
 	// Override the full Vault address (e.g., https://vault.example.com)
 	// This takes precedence over service discovery
 	// +optional
@@ -397,13 +408,87 @@ type CustomCondition struct {
 	Condition string `json:"condition"`
 }
 
+// UnsealMode selects how the operator recovers a sealed Vault.
+//
+// "transit" (the default, and what every pre-existing resource gets) drives a
+// Vault whose seal stanza is `seal "transit"`: there is no API to trigger such
+// an unseal, so recovery means restarting the pod and letting it unseal from
+// its seal stanza at boot.
+//
+// "stored-key" drives a root-of-trust Vault that is Shamir-sealed and has no
+// transit provider to lean on: the operator submits the key share(s) held in
+// an in-cluster Secret to sys/unseal.
+//
+// +kubebuilder:validation:Enum=transit;stored-key
+type UnsealMode string
+
+const (
+	// UnsealModeTransit unseals via the Vault transit seal (default).
+	UnsealModeTransit UnsealMode = "transit"
+
+	// UnsealModeStoredKey unseals by POSTing Shamir shares to sys/unseal.
+	UnsealModeStoredKey UnsealMode = "stored-key"
+)
+
+// Defaults for the stored-key Secret. They match the vault-auto-unseal CronJob
+// this mode replaces (Secret `vault-unseal-keys`, key `unseal-keys.txt`), so a
+// cluster can swap the CronJob for a CR without touching the Secret.
+const (
+	DefaultStoredKeySecretName = "vault-unseal-keys"
+	// gosec G101 fires on the identifier ("...SecretKey") plus a string
+	// literal. This is the NAME of a key inside a Secret — a filename, the
+	// same one the CronJob mounted — not the key material, which the
+	// operator only ever reads at runtime and never embeds.
+	// #nosec G101 -- Secret data key name, not a credential
+	DefaultStoredKeySecretKey = "unseal-keys.txt"
+)
+
+// StoredKeySpec configures stored-key (Shamir) unsealing.
+type StoredKeySpec struct {
+	// SecretRef points at the Secret holding the unseal key share(s), one
+	// share per line. Defaults to vault-unseal-keys/unseal-keys.txt in the
+	// Vault namespace.
+	// +optional
+	SecretRef StoredKeySecretRef `json:"secretRef,omitempty"`
+}
+
+// StoredKeySecretRef references the Secret carrying the unseal key shares.
+type StoredKeySecretRef struct {
+	// Name of the Secret
+	// +kubebuilder:default=vault-unseal-keys
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// Key inside the Secret. Its value is the share list, one per line.
+	// +kubebuilder:default=unseal-keys.txt
+	// +optional
+	Key string `json:"key,omitempty"`
+
+	// Namespace of the Secret. Defaults to vaultPod.namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+}
+
 // VaultTransitUnsealSpec defines the desired state of VaultTransitUnseal
 type VaultTransitUnsealSpec struct {
+	// Mode selects how a sealed Vault is recovered. Absent or empty means
+	// "transit", so existing resources keep their behaviour untouched.
+	// +kubebuilder:default=transit
+	// +optional
+	Mode UnsealMode `json:"mode,omitempty"`
+
 	// Vault pods to manage
 	VaultPod VaultPodSpec `json:"vaultPod"`
 
-	// Transit Vault configuration
-	TransitVault TransitVaultSpec `json:"transitVault"`
+	// Transit Vault configuration. Required in transit mode; ignored (and
+	// safely omitted) in stored-key mode.
+	// +optional
+	TransitVault TransitVaultSpec `json:"transitVault,omitempty"`
+
+	// StoredKey configures stored-key (Shamir) unsealing. Only read when
+	// mode is "stored-key"; its own defaults apply when it is omitted.
+	// +optional
+	StoredKey *StoredKeySpec `json:"storedKey,omitempty"`
 
 	// Initialization parameters
 	Initialization InitializationSpec `json:"initialization,omitempty"`
@@ -449,6 +534,18 @@ type VaultTransitUnsealStatus struct {
 
 	// Last time Vault status was checked
 	LastCheckTime string `json:"lastCheckTime,omitempty"`
+
+	// UnsealMode is the mode the operator last reconciled this resource in.
+	// Echoed back so `kubectl get vaulttransitunseal -o yaml` shows which
+	// automation is actually in charge, defaults resolved.
+	// +optional
+	UnsealMode string `json:"unsealMode,omitempty"`
+
+	// LastUnsealTime is when the operator last brought this Vault from
+	// sealed to unsealed. Only set by stored-key mode: transit mode never
+	// unseals over the API, it restarts the pod and lets Vault do it.
+	// +optional
+	LastUnsealTime string `json:"lastUnsealTime,omitempty"`
 
 	// Configuration status
 	ConfigurationStatus ConfigurationStatus `json:"configurationStatus,omitempty"`

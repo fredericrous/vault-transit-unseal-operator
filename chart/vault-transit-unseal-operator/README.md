@@ -1,6 +1,16 @@
 # vault-transit-unseal-operator
 
-A Kubernetes operator that automatically manages HashiCorp Vault initialization and unsealing using transit unseal.
+A Kubernetes operator that keeps HashiCorp Vault initialized and unsealed. It
+supports two unseal modes, chosen per resource, and one operator install serves
+both at once.
+
+| `spec.mode` | For | How it unseals |
+| --- | --- | --- |
+| `transit` (default) | A Vault with `seal "transit"` pointing at another Vault | Restarts the sealed pod so Vault re-runs its seal stanza at boot. There is no API to trigger a transit unseal. |
+| `stored-key` | A **root-of-trust** Vault, Shamir-sealed, with no transit provider to lean on | Submits the key share(s) from an in-cluster Secret to `sys/unseal`, on the running process. |
+
+`mode` is optional: a resource without it is a transit resource, so existing
+installs are unaffected by the addition of stored-key mode.
 
 ## TL;DR
 
@@ -99,6 +109,10 @@ controllerManager:
 
 ## Post-Installation
 
+Which of the two flows below you follow depends on the Vault's unseal mode.
+
+### transit mode (default)
+
 After installing the operator, you need to:
 
 1. Create a transit token secret:
@@ -128,6 +142,42 @@ spec:
     enableKV: true
 ```
 
+### stored-key mode
+
+There is no token to create. Initialization and the unseal-key Secret are owned
+by `bootstrap run <cluster> vault-setup` — the operator never does either — so
+the only step here is the resource:
+
+```yaml
+apiVersion: vault.homelab.io/v1alpha1
+kind: VaultTransitUnseal
+metadata:
+  name: vault-stored-key
+  namespace: vault
+spec:
+  mode: stored-key
+  vaultPod:
+    namespace: vault
+    selector:
+      app.kubernetes.io/name: vault
+    # A sealed pod is not ready, so the client Service will not route to it.
+    # Address pods individually through the governing headless service.
+    headlessServiceName: vault-internal
+    servicePort: 8200
+  storedKey:
+    secretRef:
+      name: vault-unseal-keys   # default
+      key: unseal-keys.txt      # default
+```
+
+Apply it before Vault is initialized if you like: it will report
+`Initialized=False / AwaitingExternalInit` and wait. Seeding the Secret unseals
+Vault immediately — the operator watches it.
+
+The full example, including the Secret's shape and the TLS options, is in
+`config/samples/vault-stored-key.yaml`. Background and the CronJob migration
+are in `docs/STORED-KEY-UNSEAL.md`.
+
 ## Monitoring
 
 If you have Prometheus installed, enable metrics collection:
@@ -144,6 +194,20 @@ helm upgrade vault-transit-unseal-operator vault-transit-unseal/vault-transit-un
 - Transit tokens should be rotated regularly
 - Consider using network policies to restrict traffic
 - Use RBAC to limit access to VaultTransitUnseal resources
+
+### stored-key mode
+
+- The unseal Secret is the entire security boundary of a root-of-trust Vault.
+  Anyone who can read it can open that Vault. Restrict it with RBAC at least as
+  tightly as you restrict the Vault admin token, and keep it out of Git.
+- The operator only ever **reads** that Secret. It never writes it and never
+  initializes Vault, so it cannot mint shares nobody captured — nor "initialize"
+  a Vault that only looks empty because its storage backend came up wrong.
+- No share reaches a log line, an event, or a status condition. The unseal path
+  is tested for exactly that.
+- Storing the key in the same cluster it unlocks is a real trade, made because
+  such a Vault has no external unseal authority by design. It rests on etcd
+  being encrypted at rest and snapshotted off-node.
 
 ## Troubleshooting
 
