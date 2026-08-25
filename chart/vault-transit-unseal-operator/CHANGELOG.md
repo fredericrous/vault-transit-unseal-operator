@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **kube-rbac-proxy image no longer pulls.** The default was
+  `gcr.io/kubebuilder/kube-rbac-proxy:v0.13.1`, a path kubebuilder has retired;
+  it now 404s, so on any cluster without it cached the operator pod sat at
+  **1/2 with ErrImagePull** — the manager container healthy, only the sidecar
+  failing. Default is now
+  `registry.k8s.io/kubebuilder/kube-rbac-proxy:v0.16.0`. Anyone who pinned an
+  override (homelab already did) is unaffected.
+- **Duplicate CRD in the published chart.** `chart/…/crds/` held the CRD under a
+  hand-written filename while the charts-repo sync copied the controller-gen
+  output in alongside it, so the released chart carried the same CRD twice under
+  two byte-identical files and `helm install` applied it twice. The chart's copy
+  now carries the generated filename,
+  `vault.homelab.io_vaulttransitunseals.yaml`, and the sync workflow REPLACES
+  `crds/` instead of merging into it, so a renamed CRD cannot linger.
+
+### Notes
+- **kube-rbac-proxy is deprecated upstream.** kubebuilder has dropped it in
+  favour of controller-runtime's own metrics filter
+  (`metricsserver.Options{SecureServing: true, FilterProvider:
+  filters.WithAuthenticationAndAuthorization}`), which removes the sidecar
+  entirely. This chart deliberately does NOT switch yet: the manager does not
+  support it today — it takes no `--metrics-secure` flag and passes no `Metrics`
+  option to `ctrl.NewManager` at all — so the move is a code change in the
+  operator, not a values flip. Tracked as future work.
+- The three CRD copies (`config/crd/bases`, the embedded `pkg/crd/crds`, and the
+  chart's) are now checked for byte-identity AND matching filenames by
+  `pkg/crd/sync_test.go`, which the normal `go test ./...` CI run executes.
+  `make verify-crds` runs that check alone; `make sync-crds` regenerates and
+  redistributes all three.
+
 ### Added
 - **Stored-key (Shamir) unseal mode.** `VaultTransitUnseal.spec.mode` selects
   between `transit` (default) and `stored-key`; the latter submits the key

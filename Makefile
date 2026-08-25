@@ -27,8 +27,27 @@ help:
 
 ##@ Development
 
+# The CRD lives in three places and all three must agree. config/crd/bases is
+# the controller-gen output and the source of truth; pkg/crd/crds is embedded
+# in the binary and self-installed at startup; the chart's copy is what
+# `helm install` applies. Filenames matter as much as contents — see
+# pkg/crd/sync_test.go.
+GENERATED_CRD_DIR ?= config/crd/bases
+EMBEDDED_CRD_DIR  ?= pkg/crd/crds
+CHART_CRD_DIR     ?= chart/vault-transit-unseal-operator/crds
+
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=$(GENERATED_CRD_DIR)
+
+sync-crds: manifests ## Copy the generated CRDs over the embedded and chart copies.
+	@for dir in $(EMBEDDED_CRD_DIR) $(CHART_CRD_DIR); do \
+		rm -f $$dir/*.yaml; \
+		mkdir -p $$dir; \
+		cp -v $(GENERATED_CRD_DIR)/*.yaml $$dir/; \
+	done
+
+verify-crds: ## Fail if the three CRD copies have drifted (contents or filenames).
+	go test ./pkg/crd/... -run 'TestCRDCopiesAreIdentical|TestChartShipsExactlyTheGeneratedCRDs|TestEmbeddedCRDsAreNotDuplicated' -count=1
 
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object paths="./..."
@@ -110,4 +129,4 @@ envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 
-.PHONY: all help manifests generate fmt vet test test-integration test-unit test-coverage build run docker-build docker-push install uninstall deploy undeploy controller-gen envtest
+.PHONY: all help manifests sync-crds verify-crds generate fmt vet test test-integration test-unit test-coverage build run docker-build docker-push install uninstall deploy undeploy controller-gen envtest

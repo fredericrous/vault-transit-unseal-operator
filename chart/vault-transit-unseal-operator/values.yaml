@@ -95,11 +95,21 @@ controllerManager:
     - --zap-time-encoding=iso8601
 
 # Kube-rbac-proxy configuration (for metrics)
+#
+# The image MUST come from registry.k8s.io. The old gcr.io/kubebuilder path was
+# retired and no longer serves this image at all — a chart still pointing there
+# leaves the operator pod stuck 1/2 in ErrImagePull, because the manager
+# container starts fine and only the sidecar fails to pull.
+#
+# kubebuilder has since deprecated kube-rbac-proxy outright, in favour of
+# controller-runtime's own WithAuthenticationAndAuthorization metrics filter.
+# That is the direction of travel, but it needs a change in the manager (see
+# CHANGELOG), not just a values flip, so the sidecar stays for now.
 kubeRbacProxy:
   enabled: true
   image:
-    repository: gcr.io/kubebuilder/kube-rbac-proxy
-    tag: v0.13.1
+    repository: registry.k8s.io/kubebuilder/kube-rbac-proxy
+    tag: v0.16.0
   args:
   - --secure-listen-address=0.0.0.0:8443
   - --upstream=http://127.0.0.1:8080/
