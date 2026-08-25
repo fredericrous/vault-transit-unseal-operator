@@ -67,7 +67,12 @@ func (r *VaultReconciler) ValidateStoredKeySecret(ctx context.Context, vtu *vaul
 func (r *VaultReconciler) handleUninitializedStoredKey(vtu *vaultv1alpha1.VaultTransitUnseal, pod *corev1.Pod) {
 	r.Log.WithValues("pod", pod.Name).Info("Vault is not initialized; stored-key mode leaves initialization to the bootstrap CLI")
 
-	NewConditionManager(vtu).SetCondition("Initialized", metav1.ConditionFalse, ReasonAwaitingExternalInit, awaitingInitMessage)
+	// Set both conditions here rather than letting updateConditions do it:
+	// this path returns before that runs, and it has a far more useful reason
+	// for Initialized than the generic "NotInitialized".
+	conditions := NewConditionManager(vtu)
+	conditions.SetCondition("Initialized", metav1.ConditionFalse, ReasonAwaitingExternalInit, awaitingInitMessage)
+	conditions.SetCondition("Ready", metav1.ConditionFalse, "VaultSealed", "Vault is sealed and not yet initialized")
 
 	if r.Recorder != nil {
 		r.Recorder.Event(vtu, corev1.EventTypeWarning, "InitializationDeferred", awaitingInitMessage)

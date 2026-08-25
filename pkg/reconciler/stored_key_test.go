@@ -449,6 +449,10 @@ func TestStoredKeyNeverInitializes(t *testing.T) {
 	assert.Equal(t, "AwaitingExternalInit", initialized.Reason)
 	assert.Contains(t, initialized.Message, "vault-setup")
 
+	ready := h.condition(t, "Ready")
+	require.NotNil(t, ready, "Ready must be reported even on the path that returns early")
+	assert.Equal(t, string(metav1.ConditionFalse), ready.Status)
+
 	assert.True(t, containsEvent(h.drainEvents(), "InitializationDeferred"))
 }
 
