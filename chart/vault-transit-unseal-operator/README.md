@@ -71,8 +71,8 @@ The following table lists the configurable parameters of the vault-transit-unsea
 | `controllerManager.securityContext` | Controller manager security context | See values.yaml |
 | `controllerManager.manager.args` | Controller manager arguments | See values.yaml |
 | `kubeRbacProxy.enabled` | Enable kube-rbac-proxy for metrics | `true` |
-| `kubeRbacProxy.image.repository` | kube-rbac-proxy image | `gcr.io/kubebuilder/kube-rbac-proxy` |
-| `kubeRbacProxy.image.tag` | kube-rbac-proxy image tag | `v0.13.1` |
+| `kubeRbacProxy.image.repository` | kube-rbac-proxy image | `registry.k8s.io/kubebuilder/kube-rbac-proxy` |
+| `kubeRbacProxy.image.tag` | kube-rbac-proxy image tag | `v0.16.0` |
 | `serviceMonitor.enabled` | Create ServiceMonitor for Prometheus | `false` |
 | `podDisruptionBudget.enabled` | Create PodDisruptionBudget | `false` |
 | `networkPolicy.enabled` | Create NetworkPolicy | `false` |
@@ -226,3 +226,21 @@ kubectl get pods -n vault-transit-unseal-system
 ```bash
 kubectl get crd vaulttransitunseals.vault.homelab.io
 ```
+
+### Pod stuck at 1/2 with ErrImagePull
+
+The manager container is fine; the kube-rbac-proxy sidecar cannot pull. Chart
+versions up to 2.7.0 defaulted to `gcr.io/kubebuilder/kube-rbac-proxy`, a path
+kubebuilder has since retired — it no longer serves the image, so the pull
+fails on any cluster that does not already have it cached.
+
+Upgrade the chart, or override the image:
+
+```bash
+helm upgrade vault-transit-unseal-operator ... \
+  --set kubeRbacProxy.image.repository=registry.k8s.io/kubebuilder/kube-rbac-proxy \
+  --set kubeRbacProxy.image.tag=v0.16.0
+```
+
+If you do not scrape metrics, `--set kubeRbacProxy.enabled=false` also clears
+it — the sidecar only fronts the metrics endpoint.
