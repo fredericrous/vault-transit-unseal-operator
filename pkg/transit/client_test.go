@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -214,12 +215,15 @@ sKx0F6gZQ5M=
 		var (
 			mockServer *httptest.Server
 			client     *transit.Client
-			sealed     bool
-			unsealErr  error
+			// sealed is written by a goroutine the mock unseal handler spawns
+			// and read by the seal-status handler on another connection, so it
+			// has to be atomic rather than a plain bool.
+			sealed    atomic.Bool
+			unsealErr error
 		)
 
 		BeforeEach(func() {
-			sealed = true
+			sealed.Store(true)
 			unsealErr = nil
 
 			// Create a mock vault server
@@ -228,7 +232,7 @@ sKx0F6gZQ5M=
 				case "/v1/sys/seal-status":
 					w.Header().Set("Content-Type", "application/json")
 					json.NewEncoder(w).Encode(map[string]interface{}{
-						"sealed":      sealed,
+						"sealed":      sealed.Load(),
 						"initialized": true,
 					})
 
@@ -243,7 +247,7 @@ sKx0F6gZQ5M=
 					// Simulate unsealing after the request
 					go func() {
 						time.Sleep(100 * time.Millisecond)
-						sealed = false
+						sealed.Store(false)
 					}()
 					w.Header().Set("Content-Type", "application/json")
 					json.NewEncoder(w).Encode(map[string]interface{}{
@@ -275,7 +279,7 @@ sKx0F6gZQ5M=
 		})
 
 		It("should skip unsealing if vault is already unsealed", func() {
-			sealed = false
+			sealed.Store(false)
 
 			// Create target client pointing to our mock server
 			cfg := vaultapi.DefaultConfig()
@@ -296,7 +300,7 @@ sKx0F6gZQ5M=
 
 			err = client.UnsealVault(ctx, targetClient)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(sealed).To(BeFalse())
+			Expect(sealed.Load()).To(BeFalse())
 		})
 
 		It("should handle seal status check error", func() {
