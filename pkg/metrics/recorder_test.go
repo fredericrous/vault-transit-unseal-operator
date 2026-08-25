@@ -254,3 +254,70 @@ func TestRecorderIntegration(t *testing.T) {
 	assert.True(t, metricNames["vault_operator_vault_status"])
 	assert.True(t, metricNames["vault_operator_initialization_total"])
 }
+
+func TestRecordUnsealAttempt(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        string
+		success     bool
+		wantLabel   string
+		wantCounter float64
+	}{
+		{
+			name:        "successful stored-key unseal",
+			mode:        "stored-key",
+			success:     true,
+			wantLabel:   "success",
+			wantCounter: 1,
+		},
+		{
+			name:        "failed stored-key unseal",
+			mode:        "stored-key",
+			success:     false,
+			wantLabel:   "failure",
+			wantCounter: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := &Recorder{
+				unsealAttemptsTotal: prometheus.NewCounterVec(
+					prometheus.CounterOpts{
+						Name: "test_unseal_attempts_total",
+						Help: "Test total",
+					},
+					[]string{"mode", "result"},
+				),
+			}
+
+			recorder.RecordUnsealAttempt(tt.mode, tt.success)
+
+			counter := recorder.unsealAttemptsTotal.WithLabelValues(tt.mode, tt.wantLabel)
+			assert.Equal(t, tt.wantCounter, testutil.ToFloat64(counter))
+		})
+	}
+}
+
+// TestUnsealAttemptsAreLabelledPerMode keeps the two modes' counters apart, so
+// an alert can say "stored-key unsealing is failing" rather than "something
+// unsealed badly somewhere".
+func TestUnsealAttemptsAreLabelledPerMode(t *testing.T) {
+	recorder := &Recorder{
+		unsealAttemptsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "test_unseal_attempts_by_mode_total",
+				Help: "Test total",
+			},
+			[]string{"mode", "result"},
+		),
+	}
+
+	recorder.RecordUnsealAttempt("stored-key", true)
+	recorder.RecordUnsealAttempt("stored-key", true)
+	recorder.RecordUnsealAttempt("stored-key", false)
+
+	assert.Equal(t, float64(2), testutil.ToFloat64(recorder.unsealAttemptsTotal.WithLabelValues("stored-key", "success")))
+	assert.Equal(t, float64(1), testutil.ToFloat64(recorder.unsealAttemptsTotal.WithLabelValues("stored-key", "failure")))
+	assert.Equal(t, float64(0), testutil.ToFloat64(recorder.unsealAttemptsTotal.WithLabelValues("transit", "success")))
+}

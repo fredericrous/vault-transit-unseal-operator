@@ -165,6 +165,12 @@ type mockMetricsRecorder struct {
 	reconciliations []reconciliationMetric
 	vaultStatuses   []vaultStatusMetric
 	initializations []bool
+	unsealAttempts  []unsealAttemptMetric
+}
+
+type unsealAttemptMetric struct {
+	mode    string
+	success bool
 }
 
 type reconciliationMetric struct {
@@ -187,6 +193,10 @@ func (m *mockMetricsRecorder) RecordVaultStatus(initialized, sealed bool) {
 
 func (m *mockMetricsRecorder) RecordInitialization(success bool) {
 	m.initializations = append(m.initializations, success)
+}
+
+func (m *mockMetricsRecorder) RecordUnsealAttempt(mode string, success bool) {
+	m.unsealAttempts = append(m.unsealAttempts, unsealAttemptMetric{mode, success})
 }
 
 type mockTransitClient struct {

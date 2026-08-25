@@ -19,6 +19,7 @@ type Recorder struct {
 	reconciliationTotal    *prometheus.CounterVec
 	vaultStatus            *prometheus.GaugeVec
 	initializationTotal    *prometheus.CounterVec
+	unsealAttemptsTotal    *prometheus.CounterVec
 	adminTokenTTL          prometheus.Gauge
 }
 
@@ -62,6 +63,13 @@ func createRecorder() *Recorder {
 			},
 			[]string{"success"},
 		),
+		unsealAttemptsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "vault_operator_unseal_attempts_total",
+				Help: "Total unseal attempts the operator drove over the Vault API, by unseal mode and outcome. Only stored-key mode increments it: transit mode has no API-driven unseal, it restarts the pod. Failures are result=\"failure\"; pair with vault_operator_vault_status{status=\"sealed\"} to alert on a Vault that stays sealed across attempts.",
+			},
+			[]string{"mode", "result"},
+		),
 		adminTokenTTL: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Name: "vault_admin_token_ttl_seconds",
@@ -76,6 +84,7 @@ func createRecorder() *Recorder {
 		r.reconciliationTotal,
 		r.vaultStatus,
 		r.initializationTotal,
+		r.unsealAttemptsTotal,
 		r.adminTokenTTL,
 	)
 
@@ -111,6 +120,16 @@ func (r *Recorder) RecordVaultStatus(initialized, sealed bool) {
 // RecordAdminTokenTTL records the admin token's remaining TTL in seconds.
 func (r *Recorder) RecordAdminTokenTTL(seconds float64) {
 	r.adminTokenTTL.Set(seconds)
+}
+
+// RecordUnsealAttempt records one API-driven unseal attempt for a mode.
+func (r *Recorder) RecordUnsealAttempt(mode string, success bool) {
+	result := "failure"
+	if success {
+		result = "success"
+	}
+
+	r.unsealAttemptsTotal.WithLabelValues(mode, result).Inc()
 }
 
 // RecordInitialization records initialization metrics
