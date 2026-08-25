@@ -1,5 +1,12 @@
 # Vault Re-initialization and Token Recovery Support
 
+> **transit mode only.** Everything below leans on the transit Vault's KV store
+> as the place admin tokens are backed up to and recovered from, so none of it
+> applies to `spec.mode: stored-key` — there is no transit Vault there. A
+> stored-key resource never initializes Vault and never re-initializes it; that
+> step belongs to `bootstrap run <cluster> vault-setup`. See
+> [STORED-KEY-UNSEAL.md](STORED-KEY-UNSEAL.md).
+
 ## Overview
 
 The vault-transit-unseal-operator now supports automatic token recovery and re-initialization of Vault instances when the admin token is lost but Vault is already initialized. This feature helps recover from scenarios where:
