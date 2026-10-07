@@ -43,8 +43,9 @@ GENERATED_CRD_DIR ?= config/crd/bases
 EMBEDDED_CRD_DIR  ?= pkg/crd/crds
 CHART_CRD_DIR     ?= chart/vault-transit-unseal-operator/crds
 
+# controller-gen paths list the module's own packages: tools/ is a separate module (gopls pin, needs go >= 1.26) that a ./... root would load under GOTOOLCHAIN=go$(GO_VERSION).
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=$(GENERATED_CRD_DIR)
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./;./api/...;./controllers/...;./pkg/..." output:crd:artifacts:config=$(GENERATED_CRD_DIR)
 
 sync-crds: manifests ## Copy the generated CRDs over the embedded and chart copies.
 	@for dir in $(EMBEDDED_CRD_DIR) $(CHART_CRD_DIR); do \
@@ -57,7 +58,7 @@ verify-crds: ## Fail if the three CRD copies have drifted (contents or filenames
 	go test ./pkg/crd/... -run 'TestCRDCopiesAreIdentical|TestChartShipsExactlyTheGeneratedCRDs|TestEmbeddedCRDsAreNotDuplicated' -count=1
 
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object paths="./..."
+	$(CONTROLLER_GEN) object paths="./;./api/...;./controllers/...;./pkg/..."
 
 fmt: ## Run go fmt against code.
 	go fmt ./...
