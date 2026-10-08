@@ -1,5 +1,5 @@
 ---
-status: active
+status: done
 branch: feat/admin-token-rotation
 repos: [vault-transit-unseal-operator, homelab]
 adrs: []
@@ -67,8 +67,8 @@ rotation can be forced in response to a leak, even while scheduled rotation is o
   (`release.yaml:38-45`), and `enableMonitoring: false` (`:109`). The other readers are Jobs and
   CronJobs that read the Secret at pod creation: pki-istio-*, vault-audit-setup and the setup-jobs in
   `vault`/`vault-config-operator`, plus openwebui's `vault-role-setup`. `bootstrap seed` reads it once
-  per run (`seed.go:294`). Every ESO store uses `auth=kubernetes`. Reflected copies live in 7
-  namespaces, and emberstack reflector propagates source updates. Reloader runs in homelab.
+  per run (`seed.go:294`). Every ESO store uses `auth=kubernetes`. Reflected copies live in 6
+  namespaces (garage, listed in the reflection annotation, has none), and emberstack reflector propagates source updates. Reloader runs in homelab.
 - **Operator internals.**
   - `SimpleManager` embeds only the cached client (`manager_simple.go:33-44`); there is no APIReader.
   - `renew_test.go` tests only early returns with a `nil` Vault client, and the wire path is left to the
@@ -317,7 +317,7 @@ loop stops:
     token can keep it alive indefinitely, and only a revocation contains it.
 - 🧑 decision: cut operator **v2.8.0** after merge (`work.release-on-request`, via `tag-release`).
 
-### Phase 4 — homelab rollout PR (pointer plan) — rotation still off
+### Phase 4 — homelab rollout PR (pointer plan) — rotation still off ✅
 - `controllers/vault-transit-unseal-operator.yaml`: bump the chart 2.6.2 → 2.8.0.
 - `vault-transit-unseal.yaml`: `autoRotate: false` (unchanged), `rotationPeriod: "720h"`,
   `rotationGracePeriod: "1h"`. Rewrite the comment at :57-64 to say scheduled rotation is turned on in
@@ -381,7 +381,7 @@ loop stops:
   - Fix the pointer at `monitor-vault-auth-alerts.yaml:119`.
 - `amont agents-md`, staged into the same commit.
 
-### Phase 5 — first rotation by hand, then the closing PR — homelab
+### Phase 5 — first rotation by hand, then the closing PR — homelab ✅
 1. After the merge and the Flux reconcile, check that:
    - every PKI role still reads `generate_lease=false` and no `pki-istio-*` role has appeared. If any
      shows true, stop before `rotate-now`;
@@ -428,21 +428,21 @@ Rollback trigger: any Vault 403 in the `vault-config-operator` logs, or `VaultAd
 
 | Driven | Expected | Observed |
 |---|---|---|
-| `vault read <mount>/roles/<role>` for every PKI mount, before `rotate-now` | all `generate_lease=false` (2026-10-07: `pki/client-cert` false, `pki-istio-*` no roles) | |
+| `vault read <mount>/roles/<role>` for every PKI mount, before `rotate-now` | all `generate_lease=false` (2026-10-07: `pki/client-cert` false, `pki-istio-*` no roles) | unchanged on 2026-10-08 before `rotate-now` |
 | `make test lint` (operator) | green; each `rotate_test.go` case fails when its recorded-call or ledger assertion is inverted | `make test`: all 15 packages ok. `make lint`: no finding in the changed code; 30 findings already on `origin/main` remain (CI's lint step is non-blocking). Mutation check, one bug at a time in `rotate.go`/`ledger.go`/`manager_simple.go`: no current-accessor guard, revoke on uncertain swap, recovery ignoring the ledger, old entry dropped unconditionally, `enabled` ignored, verification skipped, no backoff growth — each fails ≥1 test. A fence treating a conflict as not-landed fails none: the follow-up ledger write is preconditioned too, conflicts, and the next pass finds the swap landed (2026-10-08) |
-| `tests/prometheus/run.sh` (homelab) | the 9 token-rotation rule tests pass; each fails when its expected alert is removed | |
+| `tests/prometheus/run.sh` (homelab) | the 9 token-rotation rule tests pass; each fails when its expected alert is removed | 9 pass; each of the 7 new alerts removed in turn fails the run (homelab #1035, 2026-10-08) |
 | Operator from the branch vs `vault server -dev`, token older than `rotationPeriod: 1m`, grace 1m, 3 pod passes | exactly 1 `create`; old accessor revoked 1 min later and `lookup-accessor` invalid; 0 renewal conflicts | `TestLiveScheduledRotation` (Vault 1.21.1 dev + envtest kube-apiserver 1.29; period 2s after a 3s wait): 1 create over 3 passes; old accessor valid during grace, invalid at +61s; ledger empty; 0 renewal errors (2026-10-08) |
 | Same, a proxy in front of the apiserver that holds the swap PUT 5s, then forwards, against the 2s per-write deadline | the swap is uncertain, then commits late; the fence conflicts; the re-read sees the minted token; not revoked; no `unresolved` left | Differs, and safe. `TestLiveHeldSwap`: the backoff write after the 2s timeout lands first and moves the RV, so the held swap is rejected when forwarded at 5s. The next pass fences it as not landed and revokes the minted token; settled with no valid rotation token and an empty ledger. The expected path, run as `TestLiveSwapCommitsAfterVerificationRead` (backoff write lost, swap released after the fence's read): writes `ledger swap backoff fence`; the minted token is live and valid, not revoked; the ledger holds only the old `superseded` entry (2026-10-08) |
 | Fault matrix (dev Vault): a crash, and separately an uncertain result, injected after the ledger write, the swap and the fence | each run ends with the minted token installed xor revoked-and-verified; the ledger empty or scheduled-only | `TestLiveFaultMatrix`, 10 cases, every injection asserted to have hit its write (JSON client). Ledger lost-after-commit (±crash) and 500: not swapped, 0 valid rotation tokens. Swap lost-after-commit (±crash): swapped, the 1 valid rotation token is the live one. Swap 500 (±crash), fence lost-after-commit (±crash), fence 500 + crash: not swapped, 0 valid. Ledger empty in all 10 (2026-10-08) |
 | 1h of forced swap failures (proxy returns 500 only on the PUT that changes `token`, so the ledger write passes) | 6 mints at about t=0/1/3/7/15/31 min; each fence succeeds; every minted accessor's `lookup-accessor` answers invalid; `ledger_entries` back to 0; `RotationFailing` fires | `TestLiveHourOfSwapFailures` (passes every 30s on the operator clock): mints at 0s, 1m, 3m, 7m, 15m, 31m; 0 valid rotation tokens after; ledger 0; ledger never above the cap. The alert itself is a Phase 4 row (2026-10-08) |
 | Same, `autoRotate=false` + `rotate-now`; then `enabled: false` + `rotate-now` | 1 swap and `TokenRotated`; then `TokenRotationSkipped` and no `create` | `TestLiveForcedAndNotOwned`: 1 create, `rotate-now` cleared; with `enabled: false`, still 1 create and `TokenRotationSkipped` (2026-10-08) |
-| homelab after merge: Deployment annotations; `vault-admin-setup` Job log; `token-accessor` | reload annotation present; one Job run with no `Creating vault-admin token`; accessor unchanged | |
-| homelab: forced `rotate-now` | `TokenRotated` event; ledger holds 1 `superseded` entry; new token `orphan: true`, period 168h | |
-| hash of `.data.token` in the 7 reflected copies | all equal the source within 1 min | |
-| `vault-config-operator` pods | restarted by Reloader before the entry's `notBefore`; ≥1 Ready throughout; 0 Vault 403 for 1h after the revoke | |
-| `kubectl create job --from=cronjob/pki-istio-verify` after the revoke | Complete | |
-| `vault token lookup -accessor <old>` after `notBefore` + 30s | `invalid accessor`; ledger empty | |
-| Prometheus | creation timestamp ≈ now; observation fresh; `revocations_pending` 1 → 0; `rotations_total{result="success"}` +1; no alert | |
+| homelab after merge: Deployment annotations; `vault-admin-setup` Job log; `token-accessor` | reload annotation present; one Job run with no `Creating vault-admin token`; accessor unchanged | reload annotation and strategy 0/1 live; Job 12:30:47Z succeeded with no mint; accessor unchanged until the forced rotation (homelab #1035, 2026-10-08) |
+| homelab: forced `rotate-now` | `TokenRotated` event; ledger holds 1 `superseded` entry; new token `orphan: true`, period 168h | 12:34:39Z: `TokenRotated` 85UJ4V… → 1y3uSV… in 10s; 1 `superseded` entry; orphan, period 604800, meta `source: rotation` (2026-10-08) |
+| hash of `.data.token` in the 7 reflected copies | all equal the source within 1 min | Differs: 6 copies, not 7 — garage has none (before and after this change); the 6 matched within 40s (2026-10-08) |
+| `vault-config-operator` pods | restarted by Reloader before the entry's `notBefore`; ≥1 Ready throughout; 0 Vault 403 for 1h after the revoke | new pod 2s after the swap, rolled one at a time, ≥1 Ready; 0 Vault 403 on both pods from the swap (12:34:39Z) to 14:35Z, a full hour after the revoke at 13:34:39Z: pattern `code: 403|permission denied`, 0 `ERROR` lines, 64 reconcile cycles in that hour (a bare `403` grep matched 6 reconcile IDs containing those digits, none an error) (2026-10-08) |
+| `kubectl create job --from=cronjob/pki-istio-verify` after the revoke | Complete | Complete (2026-10-08) |
+| `vault token lookup -accessor <old>` after `notBefore` + 30s | `invalid accessor`; ledger empty | `Code: 400 … invalid accessor`; `TokenRevoked`; ledger annotation gone (2026-10-08) |
+| Prometheus | creation timestamp ≈ now; observation fresh; `revocations_pending` 1 → 0; `rotations_total{result="success"}` +1; no alert | age 3,687 s after the revoke; `revocations_pending` 0 (the 1 before the revoke was seen in the ledger annotation — 1 `superseded` entry — not captured from the metric); success 1, failure 0; 8 `VaultAdminToken*` rules loaded, none firing (2026-10-08) |
 
 ## Decision log
 
@@ -477,6 +477,9 @@ Rollback trigger: any Vault 403 in the `vault-config-operator` logs, or `VaultAd
     kube-apiserver) rather than a hand-run proxy, so it can be rerun;
   - the best-effort backoff write after a failed swap also fences that swap. This is safe, and the
     held-swap row records it.
+- Closing (2026-10-08): two closing pull requests instead of one — homelab #1037 (`autoRotate: true`,
+  Phase 5 step 3, as the plan wrote it) and this one, which records the evidence in the canonical plan, which
+  lives in this repository.
 - Implementation review, round 1 (2026-10-08):
   - minting stops at **15** ledger entries: a rotation holds two slots until its swap lands. Phase 4's
     `VaultAdminTokenLedgerFull` therefore fires at `>= 15`, not `>= 16`;
@@ -496,7 +499,12 @@ when a late swap skips the backoff, since the behaviour is tested and a code cha
 
 ## Outcome
 
-Phases 1–3 are implemented and verified in the operator (this branch). Next: release v2.8.0 (🧑 decision),
-then Phase 4, the homelab rollout PR.
+Done. The operator rotates the admin token (v2.8.0, PR #10); homelab runs it (#1035), and the first
+rotation was forced and watched on 2026-10-08, after which scheduled rotation was turned on by the
+closing PR, homelab #1037 (merged 2026-10-08; Flux applied `autoRotate: true` by 13:52Z, `vault_admin_token_auto_rotate` = 1, no rotation fired since the token was minutes old). The live token that had been unchanged since 2026-06-04 is revoked.
+
+Follow-up outside this plan: the transit backup of the admin token has never worked (403, the transit
+token's `transit-unseal` policy has no KV write); recovery relies on k8s-auth self-heal. Granting the
+write would let a leaked transit token read the admin token, so it was left for a decision.
 
 <!-- panel: repos=vault-transit-unseal-operator,homelab reviewers=backend,architect,lang:go,lang:python,lang:typescript,platform,po,tui,unix body-sha=0416f8fdd071 -->
