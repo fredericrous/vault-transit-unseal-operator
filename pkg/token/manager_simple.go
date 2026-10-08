@@ -41,6 +41,18 @@ type SimpleManager struct {
 	// backup-and-recover feature. Implementation lives in
 	// pkg/reconciler so SimpleManager doesn't carry transit deps.
 	AdminTokenBackup AdminTokenBackup
+	// APIReader reads the admin Secret straight from the apiserver. The
+	// renew and rotate paths decide on its token and annotations, and a
+	// cached copy can lag a swap by a reconcile. Nil falls back to Client.
+	APIReader client.Reader
+}
+
+// reader returns the uncached reader when one is wired, else the client.
+func (m *SimpleManager) reader() client.Reader {
+	if m.APIReader != nil {
+		return m.APIReader
+	}
+	return m.Client
 }
 
 // NewSimpleManager creates a new simplified token manager

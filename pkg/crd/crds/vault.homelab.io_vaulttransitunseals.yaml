@@ -276,7 +276,13 @@ spec:
                     type: boolean
                   autoRotate:
                     default: true
-                    description: Enable automatic token rotation
+                    description: |-
+                      Enable scheduled rotation: once the admin token is RotationPeriod old,
+                      the operator mints a fresh one, swaps it into the admin Secret, and
+                      revokes the old one after RotationGracePeriod. Minting needs Enabled
+                      and a strategy other than external. The vault.homelab.io/rotate-now
+                      annotation forces a rotation whatever this says, and revocations
+                      already scheduled always complete.
                     type: boolean
                   creationDelay:
                     default: 30s
@@ -359,9 +365,17 @@ spec:
                     default: vault-admin
                     description: Policy to attach to admin token
                     type: string
+                  rotationGracePeriod:
+                    default: 1h
+                    description: |-
+                      How long a rotated-out token stays valid, so consumers that read the
+                      admin Secret at start can restart onto the new one before it is revoked
+                    type: string
                   rotationPeriod:
                     default: 720h
-                    description: Rotation period
+                    description: |-
+                      Age of the admin token, from its Vault creation_time, at which a
+                      scheduled rotation mints its replacement
                     type: string
                   strategy:
                     default: delayed
