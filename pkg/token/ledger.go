@@ -46,8 +46,12 @@ const (
 
 // ledgerCap bounds the ledger so a stuck revocation or a failing swap
 // cannot grow the annotation towards the 256 KiB metadata limit. A
-// rotation adds two entries, so minting stops at ledgerCap-1.
+// rotation adds two entries, so minting is refused from ledgerFull on.
 const ledgerCap = 16
+
+// ledgerFull is the size at which minting stops: one more rotation would
+// exceed ledgerCap. The VaultAdminTokenLedgerFull alert uses this value.
+const ledgerFull = ledgerCap - 1
 
 // writeTimeout bounds every Secret write in the rotation path, so a
 // write that hangs becomes an uncertain outcome instead of a stuck pass.

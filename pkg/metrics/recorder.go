@@ -29,6 +29,7 @@ type Recorder struct {
 	adminTokenRotationPeriod    prometheus.Gauge
 	adminTokenAutoRotate        prometheus.Gauge
 	adminTokenLedgerEntries     prometheus.Gauge
+	adminTokenRevocationsPend   prometheus.Gauge
 	adminTokenOldestDueRevoke   prometheus.Gauge
 	adminTokenUnresolvedMints   prometheus.Gauge
 	adminTokenRotationsTotal    *prometheus.CounterVec
@@ -109,6 +110,10 @@ func createRecorder() *Recorder {
 			Name: "vault_admin_token_ledger_entries",
 			Help: "Entries in the admin Secret's revoke ledger: retired tokens awaiting revocation and mints whose swap is unresolved.",
 		}),
+		adminTokenRevocationsPend: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "vault_admin_token_revocations_pending",
+			Help: "Admin tokens the operator retired or minted and has not yet seen to its end (the revoke ledger's entries). Drain to 0 before downgrading to an operator without rotation.",
+		}),
 		adminTokenOldestDueRevoke: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "vault_admin_token_oldest_due_revoke_timestamp_seconds",
 			Help: "notBefore of the oldest scheduled revocation that is already due, unix seconds; 0 when none is due.",
@@ -147,6 +152,7 @@ func createRecorder() *Recorder {
 		r.adminTokenRotationPeriod,
 		r.adminTokenAutoRotate,
 		r.adminTokenLedgerEntries,
+		r.adminTokenRevocationsPend,
 		r.adminTokenOldestDueRevoke,
 		r.adminTokenUnresolvedMints,
 		r.adminTokenRotationsTotal,
@@ -212,6 +218,7 @@ func (r *Recorder) RecordAdminTokenObservation(o AdminTokenObservation) {
 // zero when no scheduled revocation is due.
 func (r *Recorder) RecordAdminTokenLedger(entries, unresolvedMints int, oldestDue time.Time) {
 	r.adminTokenLedgerEntries.Set(float64(entries))
+	r.adminTokenRevocationsPend.Set(float64(entries))
 	r.adminTokenUnresolvedMints.Set(float64(unresolvedMints))
 	due := 0.0
 	if !oldestDue.IsZero() {

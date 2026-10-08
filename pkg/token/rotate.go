@@ -73,6 +73,11 @@ func (m *SimpleManager) RotateIfDue(
 	if err != nil || info == nil || info.Data == nil {
 		// Invalid is self-heal's job; a timeout leaves the current
 		// accessor unknown, so no revoke decision can be made.
+		reason := "empty lookup response"
+		if err != nil {
+			reason = err.Error()
+		}
+		m.Log.Info("Admin token lookup failed; rotation and revocation wait for the next pass", "reason", reason)
 		return nil
 	}
 	accessor, _ := info.Data["accessor"].(string)
@@ -83,7 +88,7 @@ func (m *SimpleManager) RotateIfDue(
 	if err != nil {
 		return fmt.Errorf("parse creation_time from token lookup: %w", err)
 	}
-	period, err := time.ParseDuration(tm.RotationPeriod)
+	period, err := time.ParseDuration(orDefault(tm.RotationPeriod, "720h"))
 	if err != nil {
 		return fmt.Errorf("parse TokenManagement.RotationPeriod %q: %w", tm.RotationPeriod, err)
 	}
@@ -186,6 +191,7 @@ func (p *rotationPass) resolveSwap(swapID string) bool {
 			"rotation stopped at fence for swap %s: outcome still unknown; the minted token is kept until it resolves",
 			swapID)
 		p.recorder.RecordAdminTokenRotation(false)
+		p.skipped("previous swap %s is unresolved; it is settled before any new mint", swapID)
 		return true
 	case fenceLanded:
 		return true
@@ -198,6 +204,7 @@ func (p *rotationPass) resolveSwap(swapID string) bool {
 	}
 	entries, err := readLedger(fresh)
 	if err != nil {
+		p.m.Log.Info("Revoke ledger unreadable while settling a swap; retrying next pass", "swap", swapID, "error", err.Error())
 		return true
 	}
 	kept := entries[:0:0]
@@ -233,10 +240,12 @@ func (p *rotationPass) fence(swapID string) (fenceOutcome, *corev1.Secret) {
 	for attempt := 0; attempt < 3; attempt++ {
 		fresh, err := p.m.getAdminSecret(p.ctx, p.vtu)
 		if err != nil {
+			p.m.Log.Info("Fence read failed; swap outcome stays unknown", "swap", swapID, "error", err.Error())
 			return fenceUnresolved, nil
 		}
 		entries, err := readLedger(fresh)
 		if err != nil {
+			p.m.Log.Info("Revoke ledger unreadable at fence; swap outcome stays unknown", "swap", swapID, "error", err.Error())
 			return fenceUnresolved, nil
 		}
 		if !hasUnresolvedMint(entries, swapID) {
@@ -251,6 +260,8 @@ func (p *rotationPass) fence(swapID string) (fenceOutcome, *corev1.Secret) {
 			return fenceNotLanded, fresh
 		}
 		if !apierrors.IsConflict(err) {
+			p.m.Log.Info("Fence write failed; swap outcome stays unknown", "swap", swapID,
+				"class", writeClass(err), "error", err.Error())
 			return fenceUnresolved, nil
 		}
 	}
@@ -376,32 +387,38 @@ func (p *rotationPass) rotateIfDue(created time.Time, period time.Duration) erro
 		return nil
 	}
 
-	skip := func(format string, args ...any) error {
+	// Not owning the credential and backing off are expected states: an
+	// event only when someone forced a rotation. A stuck ledger is a
+	// fault: an event either way.
+	quiet := func(format string, args ...any) error {
 		if forced {
-			p.m.event(p.vtu, corev1.EventTypeWarning, "TokenRotationSkipped", format, args...)
+			p.skipped(format, args...)
+		} else {
+			p.m.Log.V(1).Info("Admin token rotation skipped", "reason", fmt.Sprintf(format, args...))
 		}
-		p.m.Log.V(1).Info("Admin token rotation skipped", "reason", fmt.Sprintf(format, args...))
 		return nil
 	}
 	if !tm.Enabled {
-		return skip("token management is disabled (spec.tokenManagement.enabled=false): the operator does not own this credential")
+		return quiet("token management is disabled (spec.tokenManagement.enabled=false): the operator does not own this credential")
 	}
 	if tm.Strategy == vaultv1alpha1.TokenStrategyExternal {
-		return skip("token strategy is external: the operator does not own this credential")
+		return quiet("token strategy is external: the operator does not own this credential")
 	}
 	for _, e := range p.ledger {
 		if e.State == stateUnresolved {
-			return skip("previous swap %s is unresolved; it is settled before any new mint", e.SwapID)
+			p.skipped("previous swap %s is unresolved; it is settled before any new mint", e.SwapID)
+			return nil
 		}
 	}
-	if len(p.ledger)+2 > ledgerCap {
-		return skip("revoke ledger holds %d entries (cap %d): revocations are not completing", len(p.ledger), ledgerCap)
+	if len(p.ledger) >= ledgerFull {
+		p.skipped("revoke ledger holds %d entries (minting stops at %d): revocations are not completing", len(p.ledger), ledgerFull)
+		return nil
 	}
 	if until := p.m.backoffUntil(p.vtu, p.secret); p.now.Before(until) {
-		return skip("backing off after a failed rotation until %s", until.UTC().Format(time.RFC3339))
+		return quiet("backing off after a failed rotation until %s", until.UTC().Format(time.RFC3339))
 	}
 
-	grace, err := time.ParseDuration(tm.RotationGracePeriod)
+	grace, err := time.ParseDuration(orDefault(tm.RotationGracePeriod, "1h"))
 	if err != nil {
 		return fmt.Errorf("parse TokenManagement.RotationGracePeriod %q: %w", tm.RotationGracePeriod, err)
 	}
@@ -496,6 +513,18 @@ func (p *rotationPass) mintAndSwap(immediate bool, grace time.Duration) error {
 	return nil
 }
 
+// skipped reports a rotation that is due but cannot run now.
+func (p *rotationPass) skipped(format string, args ...any) {
+	p.m.event(p.vtu, corev1.EventTypeWarning, "TokenRotationSkipped", format, args...)
+}
+
+func orDefault(v, def string) string {
+	if strings.TrimSpace(v) == "" {
+		return def
+	}
+	return v
+}
+
 // backupRotatedToken stores the new token in the transit backup. Best
 // effort: without it, recovery falls back to Kubernetes-auth self-heal.
 func (p *rotationPass) backupRotatedToken(token string) {
@@ -517,7 +546,7 @@ func (p *rotationPass) fail(step string, err error, outcome string) error {
 	p.m.event(p.vtu, corev1.EventTypeWarning, "TokenRotationFailed",
 		"rotation failed at %s: %v; %s. Next attempt after %s",
 		step, err, outcome, until.UTC().Format(time.RFC3339))
-	p.m.persistBackoff(p.ctx, p.vtu, until)
+	p.m.persistBackoff(p.ctx, p.vtu, until, p.token)
 	return fmt.Errorf("rotation failed at %s: %w", step, err)
 }
 
@@ -615,9 +644,15 @@ func (m *SimpleManager) clearBackoff(vtu *vaultv1alpha1.VaultTransitUnseal) {
 
 // persistBackoff records the backoff on the Secret so a restarted
 // operator keeps it. Best effort: the in-memory backoff already holds.
-func (m *SimpleManager) persistBackoff(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, until time.Time) {
+// failedOn is the token the failed pass worked from; if the Secret no
+// longer holds it, a swap landed late and there is nothing to back off.
+func (m *SimpleManager) persistBackoff(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, until time.Time, failedOn string) {
 	secret, err := m.getAdminSecret(ctx, vtu)
 	if err != nil {
+		m.Log.Info("Could not read the admin Secret to record the rotation backoff", "error", err.Error())
+		return
+	}
+	if strings.TrimSpace(string(secret.Data["token"])) != failedOn {
 		return
 	}
 	if secret.Annotations == nil {
@@ -626,5 +661,7 @@ func (m *SimpleManager) persistBackoff(ctx context.Context, vtu *vaultv1alpha1.V
 	secret.Annotations[backoffAnnotation] = until.UTC().Format(time.RFC3339)
 	wctx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
-	_ = m.Update(wctx, secret)
+	if err := m.Update(wctx, secret); err != nil {
+		m.Log.Info("Could not record the rotation backoff; it holds in memory", "class", writeClass(err), "error", err.Error())
+	}
 }

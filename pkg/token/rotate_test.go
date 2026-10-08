@@ -570,12 +570,28 @@ func TestUncertainSwapCommitsAfterVerificationRead(t *testing.T) {
 	require.Len(t, minted, 1)
 
 	h.m = h.newManager()
-	h.onUpdate = nil
 	h.arm()
+	// Every write of the settling pass goes through; record what it
+	// would have stored. No write may schedule the minted token: it is
+	// the one the late commit installs.
+	var written [][]LedgerEntry
+	h.onUpdate = func(_ int, s *corev1.Secret) (error, bool) {
+		l, err := readLedger(s)
+		require.NoError(t, err)
+		written = append(written, l)
+		return nil, false
+	}
 	// Get 1 is the pass's own read; Get 2 is the fence's verification read.
 	h.commitAfterGet = 2
 	h.fv.resetCalls()
 	require.NoError(t, h.pass())
+	require.Len(t, written, 1, "exactly the fence write, which conflicts")
+	for _, l := range written {
+		for _, e := range l {
+			require.False(t, e.Accessor == minted[0] && e.State == stateScheduled,
+				"a write scheduled the minted token for revocation")
+		}
+	}
 
 	require.Empty(t, h.fv.callsOf("auth/token/revoke-accessor"))
 	require.Equal(t, minted[0], "acc-"+h.token(), "the swap landed")
@@ -584,6 +600,22 @@ func TestUncertainSwapCommitsAfterVerificationRead(t *testing.T) {
 	require.Len(t, l, 1)
 	require.Equal(t, h.currentAccessor, l[0].Accessor)
 	require.Equal(t, reasonSuperseded, l[0].Reason)
+}
+
+// A swap that times out but did land: the backoff must not be written
+// onto the rotated Secret, where it would block the next rotate-now.
+func TestNoBackoffOverALandedSwap(t *testing.T) {
+	h := newHarness(t, 800*time.Hour)
+	h.onUpdate = func(_ int, s *corev1.Secret) (error, bool) {
+		if h.isSwap(s) {
+			require.NoError(t, h.base.Update(context.Background(), s.DeepCopy()))
+			return timeout, false
+		}
+		return nil, false
+	}
+	require.Error(t, h.pass())
+	require.NotEqual(t, currentToken, h.token(), "the swap landed")
+	require.NotContains(t, h.secret().Annotations, backoffAnnotation)
 }
 
 func TestUncertainFenceKeepsEverything(t *testing.T) {
@@ -671,6 +703,7 @@ func TestNoMintWhileASwapIsUnresolved(t *testing.T) {
 	h.onUpdate = func(int, *corev1.Secret) (error, bool) { return timeout, false } // the fence stays unresolved
 	require.NoError(t, h.pass())
 	require.Empty(t, h.fv.callsOf("auth/token/create"))
+	require.True(t, hasEvent(h.drainEvents(), "TokenRotationSkipped"))
 }
 
 func TestRepeatedSwapFailuresBackOff(t *testing.T) {
@@ -693,17 +726,26 @@ func TestRepeatedSwapFailuresBackOff(t *testing.T) {
 }
 
 func TestLedgerFullRefusesToMint(t *testing.T) {
-	h := newHarness(t, time.Hour)
+	// Scheduled, not forced: a stuck ledger still raises an event.
+	h := newHarness(t, 800*time.Hour)
 	var entries []LedgerEntry
-	for i := 0; i < ledgerCap-1; i++ {
+	for i := 0; i < ledgerFull; i++ {
 		entries = append(entries, LedgerEntry{Accessor: "acc-pending-" + string(rune('a'+i)),
 			NotBefore: t0.Add(time.Hour), Reason: reasonSuperseded, State: stateScheduled, SwapID: "s"})
 	}
 	h.seedLedger(entries...)
-	h.annotate(rotateNowAnnotation, "true")
 	require.NoError(t, h.pass())
 	require.Empty(t, h.fv.callsOf("auth/token/create"))
 	require.True(t, hasEvent(h.drainEvents(), "TokenRotationSkipped"))
+	require.Equal(t, float64(ledgerFull), gauge(t, "vault_admin_token_ledger_entries"))
+	require.Equal(t, float64(ledgerFull), gauge(t, "vault_admin_token_revocations_pending"))
+
+	// One below, a rotation still fits under the cap.
+	h.seedLedger(entries[1:]...)
+	require.NoError(t, h.pass())
+	require.Len(t, h.fv.callsOf("auth/token/create"), 1)
+	// The swap drops the minted entry: 16 only between ledger write and swap.
+	require.Len(t, h.ledger(), ledgerFull)
 }
 
 // The person's case: A rotates to B, B's backup fails, B dies during the

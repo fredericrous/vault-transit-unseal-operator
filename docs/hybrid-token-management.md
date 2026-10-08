@@ -60,8 +60,9 @@ operator has retired or minted and not yet seen to its end, as JSON entries:
 | `swapID` | ties together the two entries one rotation writes |
 
 The ledger drains whatever `autoRotate`, `enabled` or `strategy` say: its
-entries are credentials the operator already retired. It holds at most 16
-entries; at the cap, minting stops.
+entries are credentials the operator already retired. A rotation needs two
+slots until its swap lands, so minting stops at 15 entries (the cap is 16),
+with a `TokenRotationSkipped` event on every refused pass.
 
 ### What each pass does
 
@@ -153,7 +154,8 @@ operator stops observing.
 | `vault_admin_token_created_timestamp_seconds` | `creation_time` of the live token |
 | `vault_admin_token_last_observation_timestamp_seconds` | last successful lookup; stops when the loop or Vault stops |
 | `vault_admin_token_rotation_period_seconds`, `vault_admin_token_auto_rotate` | the configuration in force |
-| `vault_admin_token_ledger_entries`, `vault_admin_token_unresolved_mints` | ledger size, and swaps with an unknown outcome |
+| `vault_admin_token_ledger_entries`, `vault_admin_token_revocations_pending` | ledger size (the same value; minting stops at 15) |
+| `vault_admin_token_unresolved_mints` | swaps with an unknown outcome |
 | `vault_admin_token_oldest_due_revoke_timestamp_seconds` | the oldest overdue revocation, 0 when none |
 | `vault_admin_token_rotations_total{result}` | rotation outcomes |
 | `vault_admin_token_backup_failures_total` | transit backups of a rotated token that failed |
@@ -162,6 +164,6 @@ operator stops observing.
 ## Rolling back to an operator without rotation
 
 An older operator ignores the ledger, so the tokens in it stop being revoked.
-Drain it first: wait for `vault_admin_token_ledger_entries` to reach 0, or
+Drain it first: wait for `vault_admin_token_revocations_pending` to reach 0, or
 revoke each ledgered accessor by hand and check `lookup-accessor` answers
 `invalid accessor`.
