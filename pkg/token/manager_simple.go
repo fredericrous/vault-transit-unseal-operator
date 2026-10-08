@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -16,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -45,6 +47,15 @@ type SimpleManager struct {
 	// renew and rotate paths decide on its token and annotations, and a
 	// cached copy can lag a swap by a reconcile. Nil falls back to Client.
 	APIReader client.Reader
+	// Events receives rotation events on the VaultTransitUnseal. Optional.
+	Events record.EventRecorder
+
+	// clock returns the current time; nil means time.Now. Tests set it.
+	clock func() time.Time
+	// rotationBackoff spaces mint attempts after a failed rotation. It is
+	// also written to the admin Secret, best-effort, to survive a restart.
+	backoffMu       sync.Mutex
+	rotationBackoff map[string]backoffState
 }
 
 // reader returns the uncached reader when one is wired, else the client.
@@ -292,22 +303,34 @@ func (m *SimpleManager) tryRecoverFromTransitBackup(ctx context.Context, vtu *va
 	raw := apiClient.GetAPIClient()
 	original := raw.Token()
 	raw.SetToken(backed)
-	if _, err := raw.Auth().Token().LookupSelf(); err != nil {
-		raw.SetToken(original)
+	info, err := raw.Auth().Token().LookupSelf()
+	raw.SetToken(original)
+	if err != nil {
 		m.Log.Info("Transit backup token rejected by Vault — falling through to recovery-keys path",
 			"reason", err.Error())
 		return false
 	}
-	raw.SetToken(original)
 
 	// Persist into the in-cluster Secret with the lifecycle
 	// annotations the existing flows expect.
-	secret := &corev1.Secret{}
-	if err := m.Get(ctx, client.ObjectKey{
-		Namespace: vtu.Spec.VaultPod.Namespace,
-		Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
-	}, secret); err != nil {
+	secret, err := m.getAdminSecret(ctx, vtu)
+	if err != nil {
 		m.Log.Error(err, "Failed to read admin token secret during transit recovery")
+		return false
+	}
+
+	// A backup can predate a rotation: the token it holds may be one the
+	// operator retired and is about to revoke. Reinstalling it would make
+	// the scheduled revoke hit the live token, so fall through to self-heal.
+	backedAccessor := ""
+	if info != nil && info.Data != nil {
+		backedAccessor, _ = info.Data["accessor"].(string)
+	}
+	ledger, ledgerErr := readLedger(secret)
+	if ledgerErr != nil || backedAccessor == "" || ledgerHasAccessor(ledger, backedAccessor) {
+		m.event(vtu, corev1.EventTypeWarning, "TokenRecoverySkipped",
+			"transit backup holds accessor %q, which the revoke ledger retires or cannot be checked against; recovering through Kubernetes-auth self-heal instead",
+			backedAccessor)
 		return false
 	}
 	if secret.Data == nil {
@@ -395,11 +418,6 @@ func (m *SimpleManager) buildLifecycleAnnotations(vtu *vaultv1alpha1.VaultTransi
 	if vtu.Spec.TokenManagement.AutoRotate {
 		annotations["vault.homelab.io/auto-rotate"] = "true"
 		annotations["vault.homelab.io/rotation-period"] = vtu.Spec.TokenManagement.RotationPeriod
-
-		// Calculate next rotation
-		rotationPeriod, _ := time.ParseDuration(vtu.Spec.TokenManagement.RotationPeriod)
-		nextRotation := now.Add(rotationPeriod)
-		annotations["vault.homelab.io/next-rotation"] = nextRotation.Format(time.RFC3339)
 	}
 
 	if resp.LeaseDuration > 0 {
@@ -917,24 +935,11 @@ func (m *SimpleManager) tryRecoverViaK8sAuth(ctx context.Context, vtu *vaultv1al
 	}
 	raw.SetToken(loginResp.Auth.ClientToken)
 
-	renewable := true
-	mintResp, err := raw.Auth().Token().Create(&vaultapi.TokenCreateRequest{
-		Policies:  []string{vtu.Spec.TokenManagement.PolicyName},
-		Period:    vtu.Spec.TokenManagement.TTL,
-		NoParent:  true,
-		Renewable: &renewable,
-		Metadata: map[string]string{
-			"created_by": "vault-transit-unseal-operator",
-			"purpose":    "admin-token",
-			"source":     "k8s-auth-selfheal",
-			"vtu":        fmt.Sprintf("%s/%s", vtu.Namespace, vtu.Name),
-		},
-	})
-	if err != nil || mintResp == nil || mintResp.Auth == nil || mintResp.Auth.ClientToken == "" {
+	newToken, _, err := mintAdminToken(raw, vtu, "k8s-auth-selfheal")
+	if err != nil {
 		m.Log.Error(err, "k8s-auth self-heal: token mint failed")
 		return false
 	}
-	newToken := mintResp.Auth.ClientToken
 
 	secret := &corev1.Secret{}
 	if err := m.Get(ctx, client.ObjectKey{
@@ -977,6 +982,40 @@ func (m *SimpleManager) tryRecoverViaK8sAuth(ctx context.Context, vtu *vaultv1al
 	vtu.Status.TokenStatus.State = vaultv1alpha1.TokenStateActive
 	vtu.Status.TokenStatus.LastRenewedAt = now
 	return true
+}
+
+// mintAdminToken mints a periodic, renewable, orphan admin token with the
+// client's current token, and checks Vault accepts it before returning.
+// It writes nothing: each caller records the token its own way. The
+// client's token is left as it was found.
+func mintAdminToken(raw *vaultapi.Client, vtu *vaultv1alpha1.VaultTransitUnseal, source string) (token, accessor string, err error) {
+	renewable := true
+	resp, err := raw.Auth().Token().Create(&vaultapi.TokenCreateRequest{
+		Policies:  []string{vtu.Spec.TokenManagement.PolicyName},
+		Period:    vtu.Spec.TokenManagement.TTL,
+		NoParent:  true,
+		Renewable: &renewable,
+		Metadata: map[string]string{
+			"created_by": "vault-transit-unseal-operator",
+			"purpose":    "admin-token",
+			"source":     source,
+			"vtu":        fmt.Sprintf("%s/%s", vtu.Namespace, vtu.Name),
+		},
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("create token: %w", err)
+	}
+	if resp == nil || resp.Auth == nil || resp.Auth.ClientToken == "" || resp.Auth.Accessor == "" {
+		return "", "", fmt.Errorf("create token: empty auth in response")
+	}
+
+	original := raw.Token()
+	defer raw.SetToken(original)
+	raw.SetToken(resp.Auth.ClientToken)
+	if _, err := raw.Auth().Token().LookupSelf(); err != nil {
+		return "", resp.Auth.Accessor, fmt.Errorf("validate minted token: %w", err)
+	}
+	return resp.Auth.ClientToken, resp.Auth.Accessor, nil
 }
 
 func (m *SimpleManager) lookupTokenAccessor(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, token string) (string, error) {
