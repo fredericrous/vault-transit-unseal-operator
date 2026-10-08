@@ -477,6 +477,14 @@ Rollback trigger: any Vault 403 in the `vault-config-operator` logs, or `VaultAd
     kube-apiserver) rather than a hand-run proxy, so it can be rerun;
   - the best-effort backoff write after a failed swap also fences that swap. This is safe, and the
     held-swap row records it.
+- Implementation review, round 1 (2026-10-08):
+  - minting stops at **15** ledger entries: a rotation holds two slots until its swap lands. Phase 4's
+    `VaultAdminTokenLedgerFull` therefore fires at `>= 15`, not `>= 16`;
+  - a stuck ledger, or an unresolved swap, raises `TokenRotationSkipped` on scheduled rotations too;
+    not owning the credential and the backoff stay quiet unless the rotation was forced;
+  - `vault_admin_token_revocations_pending` is published with the same value as `ledger_entries`;
+  - the backoff is not written onto a Secret whose swap landed late;
+  - an empty `rotationPeriod` / `rotationGracePeriod` falls back to 720h / 1h.
 
 ## Outcome
 
