@@ -303,7 +303,7 @@ loop stops:
     entries resolve and drain;
   - an `unresolved-mint` entry present with `rotate-now` set → no mint; `TokenRotationSkipped`;
   - repeated swap failures → mints spaced by the backoff;
-  - ledger at 16 → no mint; `LedgerFull`.
+  - ledger at 15 → no mint; `LedgerFull`.
 - `docs/hybrid-token-management.md`:
   - the lifecycle, the ledger and the fence;
   - the gating on `enabled` and `strategy`;
@@ -343,7 +343,7 @@ loop stops:
   - `VaultAdminTokenRevokeStuck`:
     `vault_admin_token_oldest_due_revoke_timestamp_seconds > 0 and time() - vault_admin_token_oldest_due_revoke_timestamp_seconds > 3600`;
   - `VaultAdminTokenMintUnresolved`: `vault_admin_token_unresolved_mints > 0`, for 30m;
-  - `VaultAdminTokenLedgerFull`: `vault_admin_token_ledger_entries >= 16`;
+  - `VaultAdminTokenLedgerFull`: `vault_admin_token_ledger_entries >= 15` (minting stops there);
   - `VaultAdminTokenRetiredCredentialLive`:
     `increase(vault_admin_token_revoke_skipped_current_total[1h]) > 0`. A ledgered (retired) token is
     in use again, so investigate which path reinstalled it;
@@ -357,7 +357,7 @@ loop stops:
   - one failure increment → `RotationFailing` fires;
   - every gauge at 0 (a fresh operator start) → `Overdue` and `ObservationStale` stay silent;
   - `unresolved_mints=1` for 30m → `MintUnresolved` fires;
-  - `ledger_entries=16` → `LedgerFull` fires;
+  - `ledger_entries=15` → `LedgerFull` fires;
   - one `revoke_skipped_current_total` increment → `RetiredCredentialLive` fires.
 
   That's 9 cases in total.
@@ -485,6 +485,14 @@ Rollback trigger: any Vault 403 in the `vault-config-operator` logs, or `VaultAd
   - `vault_admin_token_revocations_pending` is published with the same value as `ledger_entries`;
   - the backoff is not written onto a Secret whose swap landed late;
   - an empty `rotationPeriod` / `rotationGracePeriod` falls back to 720h / 1h.
+
+## Implementation review
+
+approve-with-changes, then Delta approve-with-changes with every round-1 finding resolved and no blocker.
+Fixed: `revocations_pending` added; the stall at 15 is now visible; errors are logged; the backoff is not
+written over a landed swap; the write-sequence test kills the fence mutation. deliberate: no debug log
+when a late swap skips the backoff, since the behaviour is tested and a code change would need a third pass.
+80k/119 s and 38k/52 s.
 
 ## Outcome
 
