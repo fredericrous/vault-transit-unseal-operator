@@ -101,7 +101,7 @@ rotation can be forced in response to a leak, even while scheduled rotation is o
 
 ## Phases
 
-### Phase 1 — CRD and wiring (structural) — operator
+### Phase 1 — CRD and wiring (structural) — operator ✅
 - `TokenManagementSpec`:
   - add `RotationGracePeriod string` (`+kubebuilder:default="1h"`);
   - rewrite the doc comments on `AutoRotate` and `RotationPeriod` to describe the real behaviour,
@@ -112,7 +112,7 @@ rotation can be forced in response to a leak, even while scheduled rotation is o
   built (`main.go` / `SetupWithManager`).
 - `make manifests generate`; copy the regenerated CRD into `chart/vault-transit-unseal-operator/crds`.
 
-### Phase 2 — `RotateIfDue` with a revocation ledger (behaviour) — operator
+### Phase 2 — `RotateIfDue` with a revocation ledger (behaviour) — operator ✅
 New `pkg/token/rotate.go` and `pkg/token/ledger.go`, called right after `RenewIfNeeded` at
 `vault_reconciler.go:441`. `RenewIfNeeded` also switches its Secret read to the APIReader. Every read in
 this path goes through the APIReader, and every write is an `Update` that carries the `resourceVersion`
@@ -258,7 +258,7 @@ loop stops:
 - `vault_admin_token_rotations_total{result}` and `vault_admin_token_backup_failures_total`, with every
   label initialised to 0.
 
-### Phase 3 — tests and docs — operator
+### Phase 3 — tests and docs — operator ✅
 - A fake Vault in `pkg/token/fakevault_test.go`: an `httptest.Server` that serves `lookup-self`,
   `create`, `lookup-accessor`, `revoke-accessor` and `revoke-self`, keeps token state, and records each
   call. The fake k8s client uses `interceptor.Funcs` to inject definite and uncertain `Update` failures,
@@ -429,13 +429,13 @@ Rollback trigger: any Vault 403 in the `vault-config-operator` logs, or `VaultAd
 | Driven | Expected | Observed |
 |---|---|---|
 | `vault read <mount>/roles/<role>` for every PKI mount, before `rotate-now` | all `generate_lease=false` (2026-10-07: `pki/client-cert` false, `pki-istio-*` no roles) | |
-| `make test lint` (operator) | green; each `rotate_test.go` case fails when its recorded-call or ledger assertion is inverted | |
+| `make test lint` (operator) | green; each `rotate_test.go` case fails when its recorded-call or ledger assertion is inverted | `make test`: all 15 packages ok. `make lint`: no finding in the changed code; 30 findings already on `origin/main` remain (CI's lint step is non-blocking). Mutation check, one bug at a time in `rotate.go`/`ledger.go`/`manager_simple.go`: no current-accessor guard, revoke on uncertain swap, recovery ignoring the ledger, old entry dropped unconditionally, `enabled` ignored, verification skipped, no backoff growth — each fails ≥1 test. A fence treating a conflict as not-landed fails none: the follow-up ledger write is preconditioned too, conflicts, and the next pass finds the swap landed (2026-10-08) |
 | `tests/prometheus/run.sh` (homelab) | the 9 token-rotation rule tests pass; each fails when its expected alert is removed | |
-| Operator from the branch vs `vault server -dev`, token older than `rotationPeriod: 1m`, grace 1m, 3 pod passes | exactly 1 `create`; old accessor revoked 1 min later and `lookup-accessor` invalid; 0 renewal conflicts | |
-| Same, a proxy in front of the apiserver that holds the swap PUT 5s, then forwards, against the 2s per-write deadline | the swap is uncertain, then commits late; the fence conflicts; the re-read sees the minted token; not revoked; no `unresolved` left | |
-| Fault matrix (dev Vault): a crash, and separately an uncertain result, injected after the ledger write, the swap and the fence | each run ends with the minted token installed xor revoked-and-verified; the ledger empty or scheduled-only | |
-| 1h of forced swap failures (proxy returns 500 only on the PUT that changes `token`, so the ledger write passes) | 6 mints at about t=0/1/3/7/15/31 min; each fence succeeds; every minted accessor's `lookup-accessor` answers invalid; `ledger_entries` back to 0; `RotationFailing` fires | |
-| Same, `autoRotate=false` + `rotate-now`; then `enabled: false` + `rotate-now` | 1 swap and `TokenRotated`; then `TokenRotationSkipped` and no `create` | |
+| Operator from the branch vs `vault server -dev`, token older than `rotationPeriod: 1m`, grace 1m, 3 pod passes | exactly 1 `create`; old accessor revoked 1 min later and `lookup-accessor` invalid; 0 renewal conflicts | `TestLiveScheduledRotation` (Vault 1.21.1 dev + envtest kube-apiserver 1.29; period 2s after a 3s wait): 1 create over 3 passes; old accessor valid during grace, invalid at +61s; ledger empty; 0 renewal errors (2026-10-08) |
+| Same, a proxy in front of the apiserver that holds the swap PUT 5s, then forwards, against the 2s per-write deadline | the swap is uncertain, then commits late; the fence conflicts; the re-read sees the minted token; not revoked; no `unresolved` left | Differs, and safe. `TestLiveHeldSwap`: the backoff write after the 2s timeout lands first and moves the RV, so the held swap is rejected when forwarded at 5s. The next pass fences it as not landed and revokes the minted token; settled with no valid rotation token and an empty ledger. The expected path, run as `TestLiveSwapCommitsAfterVerificationRead` (backoff write lost, swap released after the fence's read): writes `ledger swap backoff fence`; the minted token is live and valid, not revoked; the ledger holds only the old `superseded` entry (2026-10-08) |
+| Fault matrix (dev Vault): a crash, and separately an uncertain result, injected after the ledger write, the swap and the fence | each run ends with the minted token installed xor revoked-and-verified; the ledger empty or scheduled-only | `TestLiveFaultMatrix`, 10 cases, every injection asserted to have hit its write (JSON client). Ledger lost-after-commit (±crash) and 500: not swapped, 0 valid rotation tokens. Swap lost-after-commit (±crash): swapped, the 1 valid rotation token is the live one. Swap 500 (±crash), fence lost-after-commit (±crash), fence 500 + crash: not swapped, 0 valid. Ledger empty in all 10 (2026-10-08) |
+| 1h of forced swap failures (proxy returns 500 only on the PUT that changes `token`, so the ledger write passes) | 6 mints at about t=0/1/3/7/15/31 min; each fence succeeds; every minted accessor's `lookup-accessor` answers invalid; `ledger_entries` back to 0; `RotationFailing` fires | `TestLiveHourOfSwapFailures` (passes every 30s on the operator clock): mints at 0s, 1m, 3m, 7m, 15m, 31m; 0 valid rotation tokens after; ledger 0; ledger never above the cap. The alert itself is a Phase 4 row (2026-10-08) |
+| Same, `autoRotate=false` + `rotate-now`; then `enabled: false` + `rotate-now` | 1 swap and `TokenRotated`; then `TokenRotationSkipped` and no `create` | `TestLiveForcedAndNotOwned`: 1 create, `rotate-now` cleared; with `enabled: false`, still 1 create and `TokenRotationSkipped` (2026-10-08) |
 | homelab after merge: Deployment annotations; `vault-admin-setup` Job log; `token-accessor` | reload annotation present; one Job run with no `Creating vault-admin token`; accessor unchanged | |
 | homelab: forced `rotate-now` | `TokenRotated` event; ledger holds 1 `superseded` entry; new token `orphan: true`, period 168h | |
 | hash of `.data.token` in the 7 reflected copies | all equal the source within 1 min | |
@@ -469,5 +469,18 @@ Rollback trigger: any Vault 403 in the `vault-config-operator` logs, or `VaultAd
 - Rotation is hygiene, not containment of an active compromise: the runbook's incident procedure covers
   orphan tokens minted by the holder.
 - The transit token stays on manual rotation (section above).
+- Implementation (2026-10-08):
+  - every revocation of a minted token goes through `revoke-accessor` with the live admin token, then
+    `lookup-accessor`, instead of `revoke-self` with the minted token: one path, and every revoke is
+    verified;
+  - the live verification is an opt-in test (`-tags live`, real Vault dev server and envtest
+    kube-apiserver) rather than a hand-run proxy, so it can be rerun;
+  - the best-effort backoff write after a failed swap also fences that swap. This is safe, and the
+    held-swap row records it.
+
+## Outcome
+
+Phases 1–3 are implemented and verified in the operator (this branch). Next: release v2.8.0 (🧑 decision),
+then Phase 4, the homelab rollout PR.
 
 <!-- panel: repos=vault-transit-unseal-operator,homelab reviewers=backend,architect,lang:go,lang:python,lang:typescript,platform,po,tui,unix body-sha=0416f8fdd071 -->
