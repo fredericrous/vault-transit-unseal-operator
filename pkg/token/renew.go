@@ -8,9 +8,7 @@ import (
 	"time"
 
 	vaultapi "github.com/hashicorp/vault/api"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	vaultv1alpha1 "github.com/fredericrous/homelab/vault-transit-unseal-operator/api/v1alpha1"
 	"github.com/fredericrous/homelab/vault-transit-unseal-operator/pkg/metrics"
@@ -52,11 +50,10 @@ func (m *SimpleManager) RenewIfNeeded(
 		return nil
 	}
 
-	secret := &corev1.Secret{}
-	if err := m.Get(ctx, client.ObjectKey{
-		Namespace: vtu.Spec.VaultPod.Namespace,
-		Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
-	}, secret); err != nil {
+	// Uncached: right after a rotation swap the cache can still hold the
+	// old token, which this would then renew and fail to write back.
+	secret, err := m.getAdminSecret(ctx, vtu)
+	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Initial-token path will create it
 			return nil

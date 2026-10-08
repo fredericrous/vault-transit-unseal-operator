@@ -445,6 +445,12 @@ func (r *VaultReconciler) ProcessPod(ctx context.Context, pod *corev1.Pod, vtu *
 						"Failed to renew admin token: %v", err)
 				}
 			}
+
+			// Then rotate it when due, and drive its revoke ledger. The
+			// manager emits its own Token* events.
+			if err := r.TokenManager.RotateIfDue(ctx, vtu, vaultClient.GetAPIClient()); err != nil {
+				log.Error(err, "Admin token rotation failed")
+			}
 		}
 
 		// Then apply post-unseal configuration if needed

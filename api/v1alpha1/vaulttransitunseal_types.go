@@ -337,13 +337,24 @@ type TokenManagementSpec struct {
 	// +kubebuilder:default=true
 	AutoRenew bool `json:"autoRenew,omitempty"`
 
-	// Enable automatic token rotation
+	// Enable scheduled rotation: once the admin token is RotationPeriod old,
+	// the operator mints a fresh one, swaps it into the admin Secret, and
+	// revokes the old one after RotationGracePeriod. Minting needs Enabled
+	// and a strategy other than external. The vault.homelab.io/rotate-now
+	// annotation forces a rotation whatever this says, and revocations
+	// already scheduled always complete.
 	// +kubebuilder:default=true
 	AutoRotate bool `json:"autoRotate,omitempty"`
 
-	// Rotation period
+	// Age of the admin token, from its Vault creation_time, at which a
+	// scheduled rotation mints its replacement
 	// +kubebuilder:default="720h"
 	RotationPeriod string `json:"rotationPeriod,omitempty"`
+
+	// How long a rotated-out token stays valid, so consumers that read the
+	// admin Secret at start can restart onto the new one before it is revoked
+	// +kubebuilder:default="1h"
+	RotationGracePeriod string `json:"rotationGracePeriod,omitempty"`
 
 	// Dependencies that must be ready before creating token
 	Dependencies TokenDependencies `json:"dependencies,omitempty"`
