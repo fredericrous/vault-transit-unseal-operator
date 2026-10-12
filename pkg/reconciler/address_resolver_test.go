@@ -390,5 +390,5 @@ func TestResolveTransitVaultAddress(t *testing.T) {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[0:len(s)] != "" && s[0:len(substr)] == substr || len(s) > len(substr) && contains(s[1:], substr)
+	return len(s) >= len(substr) && s != "" && s[0:len(substr)] == substr || len(s) > len(substr) && contains(s[1:], substr)
 }

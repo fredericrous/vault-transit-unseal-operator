@@ -143,9 +143,9 @@ func TestCleanupMixedStateSecret(t *testing.T) {
 			assert.Equal(t, tt.expectData, updatedSecret.Data)
 
 			// Check annotations
-			if tt.expectAnnotations == nil || len(tt.expectAnnotations) == 0 {
+			if len(tt.expectAnnotations) == 0 {
 				// Expect no annotations or empty map
-				assert.True(t, updatedSecret.Annotations == nil || len(updatedSecret.Annotations) == 0)
+				assert.True(t, len(updatedSecret.Annotations) == 0)
 			} else {
 				assert.Equal(t, tt.expectAnnotations, updatedSecret.Annotations)
 			}

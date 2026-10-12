@@ -48,11 +48,9 @@ type mockVaultClient struct {
 	healthy              bool
 	shouldError          bool
 	initError            error
-	unsealError          error
 	authError            error
 	initResp             *vault.InitResponse
 	checkStatusCallCount int
-	unsealBehavior       func()
 }
 
 func (c *mockVaultClient) CheckStatus(ctx context.Context) (*vault.Status, error) {
@@ -197,44 +195,6 @@ func (m *mockMetricsRecorder) RecordInitialization(success bool) {
 
 func (m *mockMetricsRecorder) RecordUnsealAttempt(mode string, success bool) {
 	m.unsealAttempts = append(m.unsealAttempts, unsealAttemptMetric{mode, success})
-}
-
-type mockTransitClient struct {
-	shouldFail   bool
-	unsealCalled bool
-	vaultClient  *vaultapi.Client
-}
-
-func (m *mockTransitClient) UnsealVault(ctx context.Context, vaultClient *vaultapi.Client) error {
-	m.unsealCalled = true
-	m.vaultClient = vaultClient
-	if m.shouldFail {
-		return errors.New("unseal failed")
-	}
-	return nil
-}
-
-func (m *mockTransitClient) EncryptData(ctx context.Context, data []byte) (string, error) {
-	return "encrypted", nil
-}
-
-func (m *mockTransitClient) DecryptData(ctx context.Context, data string) ([]byte, error) {
-	return []byte("decrypted"), nil
-}
-
-type mockTransitClientFactory struct {
-	client      *mockTransitClient
-	shouldError bool
-}
-
-func (f *mockTransitClientFactory) NewClient(address, token, keyName, mountPath string, tlsSkipVerify bool, logger logr.Logger) (*mockTransitClient, error) {
-	if f.shouldError {
-		return nil, errors.New("failed to create transit client")
-	}
-	if f.client == nil {
-		f.client = &mockTransitClient{}
-	}
-	return f.client, nil
 }
 
 // Helper function to create a ready pod

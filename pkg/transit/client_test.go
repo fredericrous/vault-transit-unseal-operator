@@ -97,7 +97,7 @@ var _ = Describe("Transit Client Unit Tests", func() {
 			})
 
 			AfterEach(func() {
-				os.RemoveAll(tempDir)
+				_ = os.RemoveAll(tempDir)
 			})
 
 			It("should create client with valid CA certificate", func() {
@@ -231,7 +231,7 @@ sKx0F6gZQ5M=
 				switch r.URL.Path {
 				case "/v1/sys/seal-status":
 					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
 						"sealed":      sealed.Load(),
 						"initialized": true,
 					})
@@ -239,7 +239,7 @@ sKx0F6gZQ5M=
 				case "/v1/sys/unseal":
 					if unsealErr != nil {
 						w.WriteHeader(http.StatusInternalServerError)
-						json.NewEncoder(w).Encode(map[string]interface{}{
+						_ = json.NewEncoder(w).Encode(map[string]interface{}{
 							"errors": []string{unsealErr.Error()},
 						})
 						return
@@ -250,7 +250,7 @@ sKx0F6gZQ5M=
 						sealed.Store(false)
 					}()
 					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
 						"sealed": true, // Still sealed immediately after request
 					})
 
@@ -334,7 +334,7 @@ sKx0F6gZQ5M=
 			// Don't change sealed status to simulate timeout
 			mockServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"sealed":      true, // Always return sealed
 					"initialized": true,
 				})

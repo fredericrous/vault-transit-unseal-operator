@@ -127,7 +127,7 @@ var _ = Describe("Vault Client Unit Tests", func() {
 				// Check if we should return an error for this path
 				if errors[r.URL.Path] {
 					w.WriteHeader(http.StatusInternalServerError)
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
 						"errors": []string{"mock error"},
 					})
 					return
@@ -136,7 +136,7 @@ var _ = Describe("Vault Client Unit Tests", func() {
 				// Return mock responses based on path
 				switch r.URL.Path {
 				case "/v1/sys/seal-status":
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
 						"sealed":      false,
 						"initialized": true,
 					})
@@ -145,9 +145,9 @@ var _ = Describe("Vault Client Unit Tests", func() {
 				case "/v1/sys/auth":
 					if r.Method == "GET" {
 						if resp, ok := responses["/v1/sys/auth"]; ok {
-							json.NewEncoder(w).Encode(resp)
+							_ = json.NewEncoder(w).Encode(resp)
 						} else {
-							json.NewEncoder(w).Encode(map[string]interface{}{
+							_ = json.NewEncoder(w).Encode(map[string]interface{}{
 								"kubernetes/": map[string]interface{}{
 									"type": "kubernetes",
 								},
@@ -161,9 +161,9 @@ var _ = Describe("Vault Client Unit Tests", func() {
 				case "/v1/sys/mounts":
 					if r.Method == "GET" {
 						if resp, ok := responses["/v1/sys/mounts"]; ok {
-							json.NewEncoder(w).Encode(resp)
+							_ = json.NewEncoder(w).Encode(resp)
 						} else {
-							json.NewEncoder(w).Encode(map[string]interface{}{
+							_ = json.NewEncoder(w).Encode(map[string]interface{}{
 								"secret/": map[string]interface{}{
 									"type":    "kv",
 									"options": map[string]interface{}{"version": "1"},
@@ -494,7 +494,7 @@ var _ = Describe("Vault Client Unit Tests", func() {
 			tlsServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/v1/sys/health" {
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
 						"sealed":      false,
 						"initialized": true,
 					})
@@ -503,7 +503,7 @@ var _ = Describe("Vault Client Unit Tests", func() {
 
 				switch r.URL.Path {
 				case "/v1/sys/seal-status":
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
 						"sealed":      false,
 						"initialized": true,
 					})
@@ -541,7 +541,7 @@ var _ = Describe("Vault Client Unit Tests", func() {
 		})
 
 		AfterEach(func() {
-			os.RemoveAll(tempDir)
+			_ = os.RemoveAll(tempDir)
 		})
 
 		It("should handle valid CA certificate file", func() {

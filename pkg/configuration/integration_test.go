@@ -346,7 +346,7 @@ var _ = Describe("Configurator Integration Tests", func() {
 			// Create a server that returns invalid responses
 			invalidServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, "Internal Server Error")
+				_, _ = fmt.Fprint(w, "Internal Server Error")
 			}))
 			defer invalidServer.Close()
 
@@ -417,14 +417,17 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 			response := map[string]interface{}{
 				"data": mountList,
 			}
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}
 
 	case strings.HasPrefix(path, "/v1/sys/mounts/"):
 		mountPath := strings.TrimPrefix(path, "/v1/sys/mounts/")
 		if r.Method == "POST" {
 			var mount map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&mount)
+			if err := json.NewDecoder(r.Body).Decode(&mount); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			m.mounts[mountPath] = mount
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -438,14 +441,17 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 			response := map[string]interface{}{
 				"data": authList,
 			}
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}
 
 	case strings.HasPrefix(path, "/v1/sys/auth/"):
 		authPath := strings.TrimPrefix(path, "/v1/sys/auth/")
 		if r.Method == "POST" {
 			var auth map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&auth)
+			if err := json.NewDecoder(r.Body).Decode(&auth); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			m.auths[authPath] = auth
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -454,7 +460,10 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 		policyName := strings.TrimPrefix(path, "/v1/sys/policies/acl/")
 		if r.Method == "PUT" {
 			var policy map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&policy)
+			if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			m.policies[policyName] = policy["policy"].(string)
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -463,7 +472,10 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 		subPath := strings.TrimPrefix(path, "/v1/auth/kubernetes/")
 		if r.Method == "POST" || r.Method == "PUT" {
 			var data map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&data)
+			if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 
 			if subPath == "config" {
 				m.config["kubernetes"] = data

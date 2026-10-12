@@ -148,7 +148,7 @@ func resolveFromSecret(ctx context.Context, c client.Client, log logr.Logger, de
 				"default", defaultValue)
 			return defaultValue, nil
 		}
-		return "", fmt.Errorf("Secret %s/%s not found and no default value provided", namespace, ref.Name)
+		return "", fmt.Errorf("secret %s/%s not found and no default value provided", namespace, ref.Name)
 	}
 
 	valueBytes, exists := secret.Data[ref.Key]
