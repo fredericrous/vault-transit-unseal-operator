@@ -373,7 +373,7 @@ func (r *RecoveryManager) updateIncompleteSecret(ctx context.Context, vtu *vault
 func (r *RecoveryManager) createRecoveryPlaceholder(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, action RecoveryAction, reason string) error {
 	// For admin token, include the full reason as the token value for better visibility
 	data := map[string][]byte{
-		"placeholder": []byte(fmt.Sprintf("RECOVERY-REQUIRED: See recovery-instructions.txt")),
+		"placeholder": []byte("RECOVERY-REQUIRED: See recovery-instructions.txt"),
 	}
 
 	if action.SecretName == vtu.Spec.Initialization.SecretNames.AdminToken {
@@ -613,66 +613,6 @@ func (r *RecoveryManager) restoreAdminToken(ctx context.Context, vtu *vaultv1alp
 		}
 		r.Recorder.Eventf(vtu, corev1.EventTypeNormal, "TokenRecovered",
 			"Admin token successfully %s", action)
-	}
-
-	return nil
-}
-
-// backupTokenToTransit backs up token to transit vault
-func (r *RecoveryManager) backupTokenToTransit(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, token string) error {
-	// Resolve transit vault address
-	resolver := transit.NewAddressResolver(r.Client, r.Log.WithName("transit-resolver"))
-	address, err := resolver.ResolveAddress(ctx, &vtu.Spec.TransitVault, vtu.Namespace)
-	if err != nil {
-		return fmt.Errorf("resolving transit vault address: %w", err)
-	}
-
-	// Get transit vault token - from the VTU namespace
-	secretNamespace := vtu.Namespace
-
-	transitToken, err := r.secretManager.Get(ctx,
-		secretNamespace,
-		vtu.Spec.TransitVault.SecretRef.Name,
-		vtu.Spec.TransitVault.SecretRef.Key)
-	if err != nil {
-		return fmt.Errorf("getting transit token: %w", err)
-	}
-
-	// Create KV client for transit vault
-	kvClient, err := transit.NewKVClient(
-		address,
-		string(transitToken),
-		vtu.Spec.TransitVault.TLSSkipVerify,
-		r.TransitVaultCACert,
-		r.Log.WithName("transit-kv"))
-	if err != nil {
-		return fmt.Errorf("creating transit KV client: %w", err)
-	}
-
-	// Ensure KV v2 is enabled (will create if needed)
-	if err := kvClient.EnsureKVEnabled(ctx); err != nil {
-		return fmt.Errorf("ensuring KV v2 on transit vault: %w", err)
-	}
-
-	// Build backup path
-	backupPath := transit.BuildTokenBackupPath(
-		vtu.Namespace,
-		vtu.Name,
-		vtu.Spec.Initialization.TokenRecovery.TransitKVPath)
-
-	// Write token with metadata
-	metadata := transit.KVMetadata{
-		CreatedBy:  "vault-transit-unseal-operator",
-		Purpose:    "admin-token-backup-recovery",
-		BackupTime: time.Now().Format(time.RFC3339),
-		Labels: map[string]string{
-			"vault.homelab.io/instance":  vtu.Name,
-			"vault.homelab.io/namespace": vtu.Namespace,
-		},
-	}
-
-	if err := kvClient.WriteTokenWithMetadata(ctx, backupPath, token, metadata); err != nil {
-		return fmt.Errorf("writing token to transit KV: %w", err)
 	}
 
 	return nil

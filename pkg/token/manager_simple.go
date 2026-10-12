@@ -434,31 +434,6 @@ func (m *SimpleManager) buildLifecycleAnnotations(vtu *vaultv1alpha1.VaultTransi
 
 // Simplified helper methods (reuse from original manager)
 
-func (m *SimpleManager) tokenExists(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal) (bool, error) {
-	secret := &corev1.Secret{}
-	err := m.Get(ctx, client.ObjectKey{
-		Namespace: vtu.Spec.VaultPod.Namespace,
-		Name:      vtu.Spec.Initialization.SecretNames.AdminToken,
-	}, secret)
-
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
-	}
-
-	// Check if it has actual token data
-	if _, hasToken := secret.Data["token"]; hasToken {
-		// Also check if it's marked as initialized (not a placeholder)
-		if initialized, ok := secret.Annotations["vault.homelab.io/token-created"]; ok && initialized != "" {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
 func (m *SimpleManager) ensurePolicy(ctx context.Context, vtu *vaultv1alpha1.VaultTransitUnseal, vaultClient *vaultapi.Client) error {
 	policyName := "vault-admin" // Default policy name
 	if vtu.Spec.TokenManagement != nil && vtu.Spec.TokenManagement.PolicyName != "" {

@@ -61,10 +61,10 @@ func (m *DefaultManager) CreateOrUpdateWithOptions(ctx context.Context, namespac
 	}
 
 	if apierrors.IsNotFound(err) {
-		return m.Client.Create(ctx, secret)
+		return m.Create(ctx, secret)
 	}
 
-	return m.Client.Update(ctx, secret)
+	return m.Update(ctx, secret)
 }
 
 // Get retrieves a specific key from a secret

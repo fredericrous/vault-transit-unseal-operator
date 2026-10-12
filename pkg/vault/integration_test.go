@@ -363,6 +363,7 @@ path "auth/token/lookup-self" {
 				Expect(err).NotTo(HaveOccurred())
 
 				exists, err := client.MountExists(ctx, "secret")
+				Expect(err).NotTo(HaveOccurred())
 				if !exists {
 					err = client.MountSecretEngine(ctx, "secret", &vault.MountInput{
 						Type:    "kv",
@@ -571,7 +572,7 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 
 	if m.malformedResponse {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "invalid json response")
+		_, _ = fmt.Fprint(w, "invalid json response")
 		return
 	}
 
@@ -608,7 +609,7 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 			"sealed":      m.sealed,
 			"standby":     false,
 		}
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 
 	case path == "/v1/sys/seal-status":
 		w.WriteHeader(http.StatusOK)
@@ -616,20 +617,23 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 			"sealed":      m.sealed,
 			"initialized": m.initialized,
 		}
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 
 	case path == "/v1/sys/init":
 		if r.Method == "PUT" {
 			if m.initialized {
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"errors": []string{"Vault is already initialized"},
 				})
 				return
 			}
 
 			var initReq map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&initReq)
+			if err := json.NewDecoder(r.Body).Decode(&initReq); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			m.initializationData = initReq
 
 			shares := int(initReq["recovery_shares"].(float64))
@@ -645,7 +649,7 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 
 			m.initialized = true
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}
 
 	case path == "/v1/sys/auth":
@@ -657,14 +661,17 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 			response := map[string]interface{}{
 				"data": authList,
 			}
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}
 
 	case strings.HasPrefix(path, "/v1/sys/auth/"):
 		authPath := strings.TrimPrefix(path, "/v1/sys/auth/")
 		if r.Method == "POST" {
 			var authReq map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&authReq)
+			if err := json.NewDecoder(r.Body).Decode(&authReq); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			// Store auth with proper structure
 			m.auths[authPath] = map[string]interface{}{
 				"type":        authReq["type"],
@@ -686,14 +693,17 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 			response := map[string]interface{}{
 				"data": mountList,
 			}
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}
 
 	case strings.HasPrefix(path, "/v1/sys/mounts/"):
 		mountPath := strings.TrimPrefix(path, "/v1/sys/mounts/")
 		if r.Method == "POST" {
 			var mountReq map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&mountReq)
+			if err := json.NewDecoder(r.Body).Decode(&mountReq); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			// Store mount with proper structure
 			mountConfig := map[string]interface{}{
 				"type":        mountReq["type"],
@@ -715,7 +725,10 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 		policyName := strings.TrimPrefix(path, "/v1/sys/policies/acl/")
 		if r.Method == "PUT" {
 			var policy map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&policy)
+			if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			m.policies[policyName] = policy["policy"].(string)
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -732,7 +745,8 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 				configPath = parts[1]
 			}
 
-			if r.Method == "POST" || r.Method == "PUT" {
+			switch r.Method {
+			case "POST", "PUT":
 				var config map[string]interface{}
 				if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
 					w.WriteHeader(http.StatusBadRequest)
@@ -744,10 +758,10 @@ func (m *MockVaultServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 				}
 				m.authConfigs[authMethod][configPath] = config
 				w.WriteHeader(http.StatusNoContent)
-			} else if r.Method == "GET" {
+			case "GET":
 				if m.authConfigs[authMethod] != nil && m.authConfigs[authMethod][configPath] != nil {
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
 						"data": m.authConfigs[authMethod][configPath],
 					})
 				} else {

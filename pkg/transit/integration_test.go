@@ -474,7 +474,7 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 		token := r.Header.Get("X-Vault-Token")
 		if token != "mock-transit-token" {
 			w.WriteHeader(http.StatusForbidden)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"errors": []string{"permission denied"},
 			})
 			return
@@ -487,7 +487,7 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 	case path == "/v1/sys/health":
 		if m.healthy {
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"initialized": true,
 				"sealed":      false,
 				"standby":     false,
@@ -500,7 +500,7 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 		keyName := strings.TrimPrefix(path, "/v1/transit/encrypt/")
 		if keyName != "k8s-vault-unseal" && keyName != "test-key" {
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"errors": []string{"key not found"},
 			})
 			return
@@ -508,12 +508,15 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 
 		if r.Method == "POST" || r.Method == "PUT" {
 			var req map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&req)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 
 			plaintextB64, ok := req["plaintext"].(string)
 			if !ok || plaintextB64 == "" {
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"errors": []string{"plaintext cannot be empty"},
 				})
 				return
@@ -523,7 +526,7 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 			decodedPlaintext, err := base64.StdEncoding.DecodeString(plaintextB64)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"errors": []string{"invalid base64 plaintext"},
 				})
 				return
@@ -532,7 +535,7 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 			// Check if the actual plaintext is empty
 			if len(decodedPlaintext) == 0 {
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"errors": []string{"plaintext cannot be empty"},
 				})
 				return
@@ -545,7 +548,7 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 			m.encryptionCount++
 
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"data": map[string]interface{}{
 					"ciphertext": ciphertext,
 				},
@@ -556,7 +559,7 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 		keyName := strings.TrimPrefix(path, "/v1/transit/decrypt/")
 		if keyName != "k8s-vault-unseal" && keyName != "test-key" {
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"errors": []string{"key not found"},
 			})
 			return
@@ -564,12 +567,15 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 
 		if r.Method == "POST" || r.Method == "PUT" {
 			var req map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&req)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 
 			ciphertext, ok := req["ciphertext"].(string)
 			if !ok {
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"errors": []string{"invalid ciphertext"},
 				})
 				return
@@ -578,7 +584,7 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 			// Validate ciphertext format
 			if !strings.HasPrefix(ciphertext, "vault:v1:") {
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"errors": []string{"invalid ciphertext format"},
 				})
 				return
@@ -589,7 +595,7 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 			decoded, err := base64.StdEncoding.DecodeString(encoded)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"errors": []string{"invalid ciphertext"},
 				})
 				return
@@ -601,7 +607,7 @@ func (m *MockTransitVaultServer) handleRequest(w http.ResponseWriter, r *http.Re
 			plaintext := base64.StdEncoding.EncodeToString(decoded)
 
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"data": map[string]interface{}{
 					"plaintext": plaintext,
 				},
@@ -728,7 +734,7 @@ func (m *MockTargetVaultServer) handleRequest(w http.ResponseWriter, r *http.Req
 			status = http.StatusServiceUnavailable
 		}
 		w.WriteHeader(status)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"initialized": m.initialized,
 			"sealed":      m.sealed,
 			"standby":     false,
@@ -736,7 +742,7 @@ func (m *MockTargetVaultServer) handleRequest(w http.ResponseWriter, r *http.Req
 
 	case "/v1/sys/seal-status":
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"sealed":      m.sealed,
 			"initialized": m.initialized,
 			"progress":    m.unsealProgress,
