@@ -4,9 +4,10 @@
 # with `go-version-file: go.mod`, so this image is the ONLY place a Go version
 # is pinned separately — and it is the one that ends up in the shipped binary,
 # which is what Trivy and govulncheck read the stdlib version from.
-FROM golang:1.26.9-alpine AS builder
+FROM golang:1.26.11-alpine AS builder
 
 # Install build dependencies
+# hadolint ignore=DL3018
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /workspace
