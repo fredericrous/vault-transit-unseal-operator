@@ -1,6 +1,6 @@
 module github.com/fredericrous/homelab/vault-transit-unseal-operator
 
-go 1.26.9
+go 1.26.11
 
 require (
 	github.com/go-logr/logr v1.4.3
